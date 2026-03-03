@@ -9,9 +9,10 @@ from fakevine.models.cvapimodels import CommonParams, CVResponse, FilterParams, 
 from fakevine.trunks.comic_trunk import (
     AuthenticationError,
     ComicTrunk,
+    GatewayError,
     RateLimitError,
     RequestLimitError,
-    UnsupportedResponseError, GatewayError,
+    UnsupportedResponseError,
 )
 
 if TYPE_CHECKING:

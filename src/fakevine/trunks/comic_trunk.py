@@ -38,23 +38,23 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def volumes(self, params: FilterParams) -> CVResponse:
+    def volumes(self, params: FilterParams) -> VolumesResponse:
         ...
 
     @abstractmethod
-    def character(self, item_id: str, params: CommonParams) -> CVResponse:
+    def character(self, item_id: str, params: CommonParams) -> CharacterResponse:
         ...
 
     @abstractmethod
-    def characters(self, params: CommonParams) -> CVResponse:
+    def characters(self, params: CommonParams) -> CharactersResponse:
         ...
 
     @abstractmethod
-    def concept(self, item_id: str, params: CommonParams) -> CVResponse:
+    def concept(self, item_id: str, params: CommonParams) -> ConceptResponse:
         ...
 
     @abstractmethod
-    def concepts(self, params: CommonParams) -> CVResponse:
+    def concepts(self, params: CommonParams) -> ConceptsResponse:
         ...
 
     @abstractmethod
@@ -66,11 +66,11 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def issue(self, item_id: str, params: CommonParams) -> CVResponse:
+    def issue(self, item_id: str, params: CommonParams) -> IssueResponse:
         ...
 
     @abstractmethod
-    def issues(self, params: CommonParams) -> CVResponse:
+    def issues(self, params: CommonParams) -> IssuesResponse:
         ...
 
     @abstractmethod

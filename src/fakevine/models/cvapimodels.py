@@ -1,5 +1,4 @@
 # ruff: noqa: D101
-from tomlkit.items import Null
 from typing import Literal
 
 from pydantic import BaseModel, Field, computed_field
@@ -15,20 +14,17 @@ CV_STATUS_CODES: dict[int, str] = {
     107:    "Rate limit exceeded.  Slow down cowboy.",#107
 }
 
-
 ## Request Models
 class CommonParams(BaseModel):
     api_key: str | None = None
     format: Literal['json', 'xml', 'jsonp'] = 'json'
     field_list: list[str] | None = None
 
-
 class FilterParams(CommonParams):
     limit: int = Field(100, gt=0, le=100)
     offset: int = Field(0, ge=0)
     sort: str | None = "id:asc"
     filter: str | None = None
-
 
 class SearchParams(CommonParams):
     limit: int = Field(10, gt=0, le=10)
@@ -61,9 +57,14 @@ class LinkedIssue(BasicLinkedEntity):
 class SiteLinkedEntity(BasicLinkedEntity):
     site_detail_url: str
 
-class BaseCharacter(BaseModel):
-    aliases: str | None = None
+class CoreEntityModel(BaseModel):
+    id: int
+    name: str
     api_detail_url: str
+    site_detail_url: str
+
+class BaseCharacter(CoreEntityModel):
+    aliases: str | None = None
     birth: str | None
     count_of_issue_apperances: int = 0
     date_added: str
@@ -72,13 +73,10 @@ class BaseCharacter(BaseModel):
     description: str | None
     first_appeared_in_issue: LinkedIssue | None
     gender: int | None
-    id: int
     image: dict[str,str] | None
-    name: str
     origin: BasicLinkedEntity | None
     publisher: BasicLinkedEntity | None
     real_name: str | None
-    site_detail_url: str
 
 class DetailCharacter(BaseCharacter):
     character_enemies: list[SiteLinkedEntity] = []
@@ -100,21 +98,96 @@ class CharactersResponse(CVResponse):
 class CharacterResponse(CVResponse):
     results: DetailCharacter | list = []
 
-class BaseVolume(BaseModel):
+class SearchCharacter(BaseCharacter):
+    resource_type: Literal["character"] = "character"
+
+class BaseConcept(CoreEntityModel):
+    count_of_issue_apperances: int = 0
+    date_added: str
+    date_last_updated: str
+    deck: str | None
+    description: str | None
+    first_appeared_in_issue: LinkedIssue | None
+    image: dict[str,str] | None
+    start_year: str | None
+
+class DetailConcept(BaseConcept):
+    issue_credits: list[SiteLinkedEntity] = []
+    movies: list[SiteLinkedEntity] = []
+    volume_credits: list[SiteLinkedEntity] = []
+
+class ConceptsResponse(CVResponse):
+    results: list[BaseConcept]
+
+class ConceptResponse(CVResponse):
+    results: DetailConcept | list = []
+
+class SearchConcept(BaseConcept):
+    resource_type: Literal["concept"] = "concept"
+
+# TODO: episode model
+
+class AssociatedImages(BaseModel):
+    original_url: str | None
+    id: int
+    caption: str | None
+    image_tags: str | None
+
+class BaseIssue(CoreEntityModel):
     aliases: str | None = None
-    api_detail_url : str
+    name: str | None
+    cover_date: str | None
+    date_added: str
+    date_last_updated: str
+    deck: str | None
+    description: str | None
+    has_staff_review: Literal[False] | SiteLinkedEntity
+    image: dict[str,str] | None
+    associated_images: list[AssociatedImages] = []
+    issue_number: str | None # Unbelievable that this can be empty. "Mature data source."
+    store_date: str | None
+    volume: SiteLinkedEntity | None
+
+class PersonCredits(SiteLinkedEntity):
+    role: str
+
+class DetailIssue(BaseIssue):
+    character_credits: list[SiteLinkedEntity] = []
+    character_died_in: list[SiteLinkedEntity] = []
+    concept_credits: list[SiteLinkedEntity] = []
+    first_appearance_characters: None = None
+    first_appearance_concepts: None = None
+    first_appearance_locations: None = None
+    first_appearance_objects: None = None
+    first_appearance_storyarcs: None = None
+    first_appearance_teams: None = None
+    location_credits: list[SiteLinkedEntity] = []
+    object_credits: list[SiteLinkedEntity] = []
+    person_credits: list[PersonCredits] = []
+    story_arc_credits: list[SiteLinkedEntity] = []
+    team_credits: list[SiteLinkedEntity] = []
+    team_disbanded_in: list[SiteLinkedEntity] = []
+
+class IssueResponse(CVResponse):
+    results: DetailIssue | list = []
+
+class IssuesResponse(CVResponse):
+    results: list[BaseIssue] = []
+
+class SearchIssue(BaseIssue):
+    resource_type: Literal["issue"] = "issue"
+
+class BaseVolume(CoreEntityModel):
+    aliases: str | None = None
     count_of_issues: int
     date_added: str
     date_last_updated: str
     deck: str | None = None
     description: str | None
     first_issue: LinkedIssue | None
-    id: int
     image: dict[str,str] | None
     last_issue: LinkedIssue | None
-    name: str
     publisher: BasicLinkedEntity | None
-    site_detail_url: str | None
     start_year: str | None
 
 class DetailVolume(BaseVolume):
@@ -132,8 +205,10 @@ class VolumesResponse(CVResponse):
 class SearchVolume(BaseVolume):
     resource_type: Literal["volume"] = "volume"
 
-class SearchCharacter(BaseCharacter):
-    resource_type: Literal["character"] = "character"
-
 class SearchResponse(CVResponse):
-    results: list[SearchVolume | SearchCharacter | CVResponse] = []
+    results: list[
+        SearchVolume |
+        SearchCharacter |
+        SearchConcept |
+        SearchIssue |
+        CVResponse] = []
