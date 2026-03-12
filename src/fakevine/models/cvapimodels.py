@@ -56,7 +56,7 @@ class MultiResponse[T](CVResponse):
 
 class BasicLinkedEntity(BaseModel):
     class Config:  # noqa: D106
-        allow_mutation = False
+        frozen = True
 
     api_detail_url: str
     id: int
