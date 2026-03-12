@@ -24,7 +24,9 @@ def parse_person_response(api_response: str) -> list[cvdbmodels.Base]:
     api_object = cvapimodels.DetailPerson.model_validate_json(api_response)
     db_object = cvdbmodels.Person(
         birth=parse_cv_datetime(api_object.birth),
-        **api_object.model_dump(include={'email','gender','country','death','hometown','website'}),
+        **api_object.model_dump(include=
+            {'email','gender','country','hometown','website'} if api_object.death is None else
+            {'email','gender','country','hometown','website','death'}),
         **select_common_fields(api_object),
     )
     output: list[cvdbmodels.Base] = [db_object]
