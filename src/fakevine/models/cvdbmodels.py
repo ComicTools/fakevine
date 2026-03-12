@@ -16,54 +16,41 @@ class Base(DeclarativeBase):
 class UpdateRecords(Base):
     __tablename__ = "cv_updaterecords"
 
-    endpoint: Mapped[str] = mapped_column(primary_key=True)
-    last_scraped_datetime_utc: Mapped[datetime.datetime]
-    last_cv_update_datetime_pt: Mapped[datetime.datetime]
+    table: Mapped[str] = mapped_column(primary_key=True, sort_order=-200)
+    last_scraped_datetime_utc: Mapped[datetime.datetime] = mapped_column(sort_order=-100)
+    last_cv_update_datetime_pt: Mapped[datetime.datetime] = mapped_column(sort_order=0)
 
 class BaseTable:
     @declared_attr.directive
-    def __tablename__(cls) -> str:  # noqa: D105
-        return f'cv_{cls.__name__.lower()}'  # ty:ignore[unresolved-attribute]
+    def __tablename__(self) -> str:  # noqa: D105
+        return f'cv_{self.__name__.lower()}'  # ty:ignore[unresolved-attribute]
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    api_detail_url: Mapped[str]
-    name: Mapped[str | None]
-    site_detail_url: Mapped[str]
+    id: Mapped[int] = mapped_column(primary_key=True, sort_order=-200)
+    api_detail_url: Mapped[str] = mapped_column(sort_order=-198)
+    name: Mapped[str | None] = mapped_column(sort_order=-199)
+    site_detail_url: Mapped[str] = mapped_column(sort_order=-197)
 
 class BaseEntity(BaseTable):
-    aliases: Mapped[str | None]
-    date_added: Mapped[datetime.datetime]
-    date_last_updated: Mapped[datetime.datetime]
-    deck: Mapped[str | None]
-    description: Mapped[str | None]
-    image: Mapped[dict[str,str | None] | None] = mapped_column(JSON)
+    aliases: Mapped[str | None] = mapped_column(sort_order=-140)
+    date_added: Mapped[datetime.datetime] = mapped_column(sort_order=-150)
+    date_last_updated: Mapped[datetime.datetime] = mapped_column(sort_order=-151)
+    deck: Mapped[str | None] = mapped_column(sort_order=-100)
+    description: Mapped[str | None] = mapped_column(sort_order=-90)
+    image: Mapped[dict[str,str | None] | None] = mapped_column(JSON, sort_order=-80)
 
 class Character(BaseEntity, Base):
-    first_appeared_in_issue_id : Mapped[int | None]
-    # first_appeared_in_issue: Mapped[Issue] = relationship(
-    #     primaryjoin="Charater.first_appeared_in_issue_id == Issue.id",
-    #     foreign_keys="[Character.first_appeared_in_issue_id]")
-    birth: Mapped[datetime.datetime | None]
+    birth: Mapped[datetime.date | None]
     gender: Mapped[int]
     origin_id: Mapped[int | None]
-    # origin: Mapped[Origin] = relationship(
-    #     primaryjoin="Charater.origin_id == Origin.id",
-    #     foreign_keys="[Character.origin_id]")
     publisher_id: Mapped[int | None]
-    # publisher: Mapped[Publisher] = relationship(
-    #     primaryjoin="Character.publisher_id == Publisher.id",
-    #     foreign_keys="[Character.publisher_id]")
     real_name: Mapped[str | None]
-    # count_of_issue_appearances: int
-    # enemies
-    # friends
-    # issues
 
-# TODO(@falo2k): Come back to this later to sort out symmetrical relationships.  Maybe add constraints to ensure id > id and then unions.
+
+# No constraints, but assumes that id <= enemy_id and is symmetrical.
 class CharacterEnemy(Base):
     __tablename__ = 'cv_character_enemy'
 
-    character_id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
     character: Mapped[Character] = relationship(
         primaryjoin="CharacterEnemy.character_id == Character.id",
         foreign_keys="[CharacterEnemy.character_id]")
@@ -72,10 +59,11 @@ class CharacterEnemy(Base):
         primaryjoin="CharacterEnemy.enemy_id == Character.id",
         foreign_keys="[CharacterEnemy.enemy_id]")
 
+# No constraints, but assumes that id <= friend_id and is symmetrical.
 class CharacterFriend(Base):
     __tablename__ = 'cv_character_friend'
 
-    character_id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
     character: Mapped[Character] = relationship(
         primaryjoin="CharacterFriend.character_id == Character.id",
         foreign_keys="[CharacterFriend.character_id]")
@@ -84,15 +72,19 @@ class CharacterFriend(Base):
         primaryjoin="CharacterFriend.friend_id == Character.id",
         foreign_keys="[CharacterFriend.friend_id]")
 
+class CharacterPower(Base):
+    __tablename__ = 'cv_character_power'
+
+    character_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
+    power_id: Mapped[int] = mapped_column(primary_key=True)
+
 class Concept(BaseEntity, Base):
-    # first_appeared_in_issue
-    # start_year = earliest issue
-    # count_of_issue_appearances: int
     ...
 
 class Issue(BaseEntity, Base):
     # In the API, this would return "false" for None
-    has_staff_review: Mapped[dict[str, str] | None] = mapped_column(JSON)
+    # Dropping from the model as a fairly useless field
+    # has_staff_review: Mapped[dict[str, str] | None] = mapped_column(JSON)  # noqa: ERA001
     volume_id: Mapped[int | None]
     volume: Mapped[Volume] = relationship(
         primaryjoin="Issue.volume_id == Volume.id",
@@ -100,25 +92,21 @@ class Issue(BaseEntity, Base):
     issue_number: Mapped[str | None]
     cover_date: Mapped[datetime.date | None]
     store_date: Mapped[datetime.date | None]
-    #location_credits: Mapped[list[Location]] = relationship(secondary="IssueLocation")
-    #character_credits
-    #concept_credits
-    #object_credits
-    #person_credits
-    #storyarc_credits
-    #team_credits
-    #team_disbanded_in
+
+class IssueAssociatedImage(Base):
+    __tablename__ = 'cv_issue_associated_image'
+
+    issue_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-200)
+    id: Mapped[int] = mapped_column(primary_key=True, sort_order=-150)
+    caption: Mapped[str | None]
+    original_url: Mapped[str | None]
+    image_tags: Mapped[str | None]
+
 
 class Location(BaseEntity, Base):
-    # first_appeared_in_issue : Mapped[int | None]
-    # start_year = earliest issue
-    # count_of_issue_appearances: int
     ...
 
 class Object(BaseEntity, Base):
-    # first_appeared_in_issue : Mapped[int | None]
-    # start_year = earliest issue
-    # count_of_issue_appearances: int
     ...
 
 class Origin(BaseTable, Base):
@@ -133,7 +121,6 @@ class Person(BaseEntity, Base):
     death: Mapped[dict | None] = mapped_column(JSON)
     hometown: Mapped[str | None]
     website: Mapped[str | None]
-    # count_of_issue_appearances: int
 
 class Power(BaseEntity, Base):
     ...
@@ -144,8 +131,6 @@ class Publisher(BaseEntity, Base):
     location_state: Mapped[str | None]
 
 class StoryArc(BaseEntity, Base):
-    # first_appeared_in_issue : Mapped[int | None]
-    # count_of_issue_appearances: int
     publisher_id: Mapped[int | None]
     publisher: Mapped[Publisher] = relationship(
         primaryjoin="StoryArc.publisher_id == Publisher.id",
@@ -158,14 +143,35 @@ class Team(BaseEntity, Base):
         primaryjoin="Team.publisher_id == Publisher.id",
         foreign_keys="[Team.publisher_id]",
     )
-    #count_of_team_members: int
-    # first_appeared_in_issue : Mapped[int | None]
-    # count_of_issue_appearances: int
+
+class TeamCharacterFriend(Base):
+    __tablename__ = 'cv_team_character_friend'
+
+    team_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
+    character_id: Mapped[int] = mapped_column(primary_key=True)
+
+class TeamCharacterEnemy(Base):
+    __tablename__ = 'cv_team_character_enemy'
+
+    team_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
+    character_id: Mapped[int] = mapped_column(primary_key=True)
+
+class TeamCharacterMember(Base):
+    __tablename__ = 'cv_team_character_member'
+
+    team_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
+    character_id: Mapped[int] = mapped_column(primary_key=True)
+
+class TeamIssueDisbanded(Base):
+    __tablename__ = 'cv_team_issue_disbanded'
+
+    team_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
+    issue_id: Mapped[int] = mapped_column(primary_key=True)
 
 class Type(Base):
     __tablename__ = 'cv_type'
 
-    id: Mapped[int]
+    id: Mapped[int] = mapped_column(sort_order=-200)
     detail_resource_name: Mapped[str]  = mapped_column(primary_key=True)
     list_resource_name: Mapped[str] =  mapped_column(primary_key=True)
 
@@ -175,57 +181,44 @@ class Volume(BaseEntity, Base):
         primaryjoin="Volume.publisher_id == Publisher.id",
         foreign_keys="[Volume.publisher_id]",
     )
-    # first_issue
-    # last_issue
     start_year: Mapped[str | None]
-    #count_of_issues: int
-    #issues
-    #characters
-    #locations
-    #objects
 
 class IssueLocation(Base):
     __tablename__ = 'cv_issue_location'
 
-    issue_id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
     location_id: Mapped[int] = mapped_column(primary_key=True)
 
 class IssueTeam(Base):
     __tablename__ = 'cv_issue_team'
 
-    issue_id: Mapped[int] = mapped_column(primary_key=True)
-    team_id: Mapped[int] = mapped_column(primary_key=True)
-
-class TeamIssueDisbanded(Base):
-    __tablename__ = 'cv_team_issue_disbanded'
-
-    issue_id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
     team_id: Mapped[int] = mapped_column(primary_key=True)
 
 class IssueCharacter(Base):
     __tablename__ = 'cv_issue_character'
 
-    issue_id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
     character_id: Mapped[int] = mapped_column(primary_key=True)
 
 class CharacterIssueDied(Base):
     __tablename__ = 'cv_character_issue_died'
 
     issue_id: Mapped[int] = mapped_column(primary_key=True)
-    character_id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
 
 class IssueCredit(Base):
     __tablename__ = 'cv_issue_credit'
 
-    issue_id: Mapped[int] = mapped_column(primary_key=True)
-    person_id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
+    person_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-50)
 
     role: Mapped[str]
 
 class IssueConcept(Base):
     __tablename__ = 'cv_issue_concept'
 
-    issue_id: Mapped[int] = mapped_column(primary_key=True)
+    issue_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
     concept_id: Mapped[int] = mapped_column(primary_key=True)
 
 class IssueObject(Base):
@@ -237,6 +230,11 @@ class IssueObject(Base):
 class StoryArcIssue(Base):
     __tablename__ = 'cv_storyarc_issue'
 
-    storyarc_id: Mapped[int] = mapped_column(primary_key=True)
+    storyarc_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
     issue_id: Mapped[int] = mapped_column(primary_key=True)
 
+class CharacterCreator(Base):
+    __tablename__= 'cv_character_creator'
+
+    person_id:  Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
+    character_id: Mapped[int] = mapped_column(primary_key=True)

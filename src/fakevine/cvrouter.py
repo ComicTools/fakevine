@@ -79,7 +79,7 @@ class CVRouter:
             RateLimitError : CVRouter.RATE_LIMITED,
             AuthenticationError : CVRouter.INVALID_API_KEY,
             RequestLimitError : CVRouter.REQUEST_LIMIT_BREACH,
-            GatewayError: HTMLResponse(status_code=status.HTTP_502_BAD_GATEWAY, 
+            GatewayError: HTMLResponse(status_code=status.HTTP_502_BAD_GATEWAY,
                 content="<html><title>502 Bad Gateway</title><body>502 Bad Gateway</body></html>"),
         }
 
@@ -153,7 +153,8 @@ class CVRouter:
         if self.api_key is not None and params.api_key is None:
             return CVRouter.INVALID_API_KEY
 
-        # TODO Process conversion of responses into other formats
+        # TODO@falo2k:  Process conversion of responses into other formats
+        # https://github.com/falo2k/fakevine/issues/2
         if params.format != "json":
             return CVRouter.OBJECT_NOT_FOUND
 
@@ -163,7 +164,7 @@ class CVRouter:
             try:
                 data = trunk_method(params=params) if item_id is None else trunk_method(item_id=item_id, params=params)
             except (RateLimitError, AuthenticationError, RequestLimitError, GatewayError) as ex:
-                return self._exception_responses[type(ex)]
+                return self._exception_responses[type(ex)]  # ty:ignore[invalid-argument-type]
             except UnsupportedResponseError as ex:
                 error_msg = f"Response not handled: {ex}"
                 logger.error(error_msg)
@@ -195,7 +196,7 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.search)
 
     async def _get_types(self,
-                        format: Literal['json', 'xml', 'jsonp'] = 'json',
+                        format: Literal['json', 'xml', 'jsonp'] = 'json',  # noqa: A002
                         api_key: str | None = None) -> Response:
         return self._fetch_response(
             params=CommonParams.model_validate({'format':format, 'api_key': api_key}),

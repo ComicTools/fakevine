@@ -1,14 +1,17 @@
 import datetime
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 import typer
+from commitizen.git import commit
+from pydantic import ValidationError
 from rich.progress import BarColumn, Progress, TaskID, TaskProgressColumn, TextColumn, TimeRemainingColumn
-from sqlalchemy import Engine, MetaData, create_engine, inspect, select, text
-from sqlalchemy.exc import DatabaseError, SQLAlchemyError
+from sqlalchemy import Connection, Engine, MetaData, Table, create_engine, inspect, select, text
+from sqlalchemy.exc import DatabaseError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from fakevine.models import cvapimodels, cvdbmodels
+from fakevine.models import cvapimodels, cvdbmodels, helpers
 from fakevine.utils import cvstatic
 from fakevine.utils.console import console
 
@@ -60,7 +63,7 @@ def convert_db(reddit_db: Path, output_db: Path):
                 raise typer.Exit
 
     console.log("Input file looks good :white_check_mark:")
-    console.log("Initilising output database")
+    console.log("Initialising output database")
     try:
         output_db_engine: Engine = create_engine(f"sqlite:///{output_db.absolute()}")
         cvdbmodels.Base.metadata.create_all(output_db_engine)
@@ -88,7 +91,7 @@ def convert_db(reddit_db: Path, output_db: Path):
              (type_task, cvstatic.types, cvdbmodels.Type, cvapimodels.BaseTypes)]:
             static_data: cvapimodels.MultiResponse[api_model] = \
                 cvapimodels.MultiResponse[api_model].model_validate_json(source_data)
-            increment: float = 1.0 / len(static_data.results)
+            increment: float = 100.0 / len(static_data.results)
 
             with Session(output_db_engine) as output_session:
                 for x in static_data.results:
@@ -118,57 +121,28 @@ def convert_db(reddit_db: Path, output_db: Path):
     reddit_db_connection = reddit_db_engine.connect()
     output_session = Session(output_db_engine)
     try:
-        common_mappings: dict[str,str] = {
-            'aliases': 'aliases',
-            'date_added': 'date_added',
-            'date_last_updated': 'date_last_updated',
-            'description': 'description',
-        }
-
         task_list: dict[str, TaskID] = {}
         for table_name in expected_tables:
             task_list[table_name] = table_progress.add_task(table_name, total=100, start=False)
 
-        # I thought about making this all data driven, but it's just an absolute arse to do it reliably given the nature
-        # of the data.  It's better to just get it done to get a good data set sorted out.
+        tables_to_process = [
+            ('cv_person', helpers.parse_person_response, cvdbmodels.Person, 0),
+            ('cv_object', helpers.parse_object_reponse, cvdbmodels.Object, 0),
+            ('cv_concept', helpers.parse_concept_reponse, cvdbmodels.Concept, 0),
+            ('cv_location', helpers.parse_location_reponse, cvdbmodels.Location, 0),
+            ('cv_power', helpers.parse_power_reponse, cvdbmodels.Power, 0),
+            ('cv_publisher', helpers.parse_publisher_reponse, cvdbmodels.Publisher, 0),
+            ('cv_volume', helpers.parse_volume_reponse, cvdbmodels.Volume, 25000),
+            ('cv_character', helpers.parse_character_reponse, cvdbmodels.Character, 20000),
+            ('cv_team', helpers.parse_team_reponse, cvdbmodels.Team, 0),
+            ('cv_storyarc', helpers.parse_storyarc_reponse, cvdbmodels.StoryArc, 0),
+            ('cv_issue', helpers.parse_issue_reponse, cvdbmodels.Issue, 5000),
+        ]
 
-        # cv_person
-        table_name = 'cv_person'
-        table_progress.start_task(task_list[table_name])
-        reflected_table = reddit_db_meta.tables[table_name]
-        select_stmt = select(reflected_table.c.raw_api_response).order_by(reflected_table.c.date_last_updated.asc())
-        data = reddit_db_connection.execute(select_stmt).all()
-        increment: float = 1.0 / len(data)
-
-        output_session.begin()
-        for data_entry in data:
-            try:
-                api_object = cvapimodels.DetailPerson.model_validate_json(data_entry[0])
-                db_object = cvdbmodels.Person(
-                    birth=parse_cv_datetime(api_object.birth),
-                    **api_object.model_dump(include={'email','gender','country','death','hometown','website'}),
-                    **select_common_fields(api_object),
-                )
-                output_session.add(db_object)
-            except:  # noqa: E722 # I'm a bad bad person
-                console.log(f"Exceptions thrown parsing row. Dropping from results. {data_entry}", style="error")
-                console.print_exception()
-            finally:
-                table_progress.update(task_list[table_name], advance=increment)
-        output_session.commit()
-
-        table_progress.update(task_list[table_name], completed=100)
-
-        # cv_object
-        # cv_concept
-        # cv_location
-        # cv_power
-        # cv_publisher
-        # cv_character
-        # cv_team
-        # cv_volume
-        # cv_issue
-        # cv_storyarc
+        for table_name, parse_func, db_model, commit_batch_size in tables_to_process:
+            process_cv_table(table_progress, task_list[table_name], reddit_db_meta.tables[table_name],
+                reddit_db_connection, output_session, parse_func, commit_batch_size)
+            capture_update_record(table=table_name, db_model=db_model, session=output_session)
 
     finally:
         table_progress.stop()
@@ -177,24 +151,60 @@ def convert_db(reddit_db: Path, output_db: Path):
 
     console.log("All done! :white_check_mark:")
 
-def select_common_fields(api_object: cvapimodels.BaseEntity):
-    return api_object.model_dump(include=
-    {'id', 'site_detail_url', 'api_detail_url', 'name', 'image', 'description', 'deck', 'aliases'}) | \
-    {
-        'date_added' : parse_cv_datetime(api_object.date_added),
-        'date_last_updated' : parse_cv_datetime(api_object.date_last_updated),
-    }
+def capture_update_record(table: str, db_model: type[cvdbmodels.BaseEntity], session: Session) -> None:
+    timestamp = datetime.datetime.fromtimestamp(0, tz=ZoneInfo("US/Pacific"))
+    latest_record = session.execute(select(db_model).order_by(db_model.date_last_updated.desc())).first()
+    if latest_record is not None:
+        timestamp = latest_record[0].date_last_updated
 
-def parse_cv_datetime(input_datetime: str | None) -> datetime.datetime | None:  # noqa: D103
-    if input_datetime is None:
-        return None
+    session.add(cvdbmodels.UpdateRecords(
+        table=table,
+        last_scraped_datetime_utc=datetime.datetime.now(datetime.UTC),
+        last_cv_update_datetime_pt=timestamp))
+    session.commit()
 
-    return datetime.datetime.strptime(input_datetime, "%Y-%m-%d %H:%M:%S").replace(tzinfo=ZoneInfo("US/Pacific"))
+def process_cv_table(progress: Progress, task_id: TaskID, reddit_db_table: Table,
+                         reddit_db_connection: Connection, output_session: Session,
+                         parsing_function: Callable, commit_batch_size: int):
+        select_stmt = select(reddit_db_table.c.raw_api_response).order_by(reddit_db_table.c.date_last_updated.asc())
+        data = reddit_db_connection.execute(select_stmt).all()
+        progress.start_task(task_id)
+        increment: float = 100.0 / len(data)
+
+        output_session.begin()
+        counter = 0
+        try:
+            for data_entry in data:
+                try:
+                    output_session.add_all(parsing_function(data_entry[0]))
+                    counter += 1
+                    if commit_batch_size > 0 and counter > commit_batch_size:
+                        output_session.commit()
+                        counter = 0
+                except ValidationError as exc:
+                    console.log(f"Error validating row for {reddit_db_table.name}. Dropping. {data_entry}", style="error")
+                    console.log(exc, style="error")
+                except AttributeError:
+                    console.log(
+                        f"Attribute error in {reddit_db_table.name}. I probably need to loosen the API model. {data_entry}",
+                        style="error")
+                    console.print_exception()
+                except IntegrityError:
+                    raise
+                except:  # noqa: E722 # I'm a bad bad person
+                    console.log(f"Unrecognised exception thrown parsing row. Dropping. {data_entry}", style="error")
+                    console.print_exception()
+                finally:
+                    progress.update(task_id, advance=increment)
+
+            output_session.commit()
+        except IntegrityError as exc:
+            console.log(f"Integrity error thrown procesisng {reddit_db_table.name}.", style="error")
+            console.log(exc, style="error")
+            output_session.flush()
+            output_session.rollback()
 
 
-def parse_cv_date(input_date: str | None) -> datetime.date  | None:  # noqa: D103
-    if input_date is None:
-        return None
+        progress.update(task_id, completed=100)
 
-    return datetime.date.strptime(input_date, "%Y-%m-%d")
 

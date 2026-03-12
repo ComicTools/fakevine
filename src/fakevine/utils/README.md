@@ -11,4 +11,4 @@ Dump this README to the console.
 Print the Simple CV DB schema to the console.  This schema is used for the Simple CV DB Trunk.
 
 ## convert-reddit-db
-Converts a database dump of CV API responses that you might find somewhere, say reddit for arguments sake, into the Simple CV DB schema.
+Converts a database dump of CV API responses that you might find somewhere, say reddit for arguments sake, into the Simple CV DB schema.  Don't make your tea based on the timers - they struggle with estimating from the stop/start of the commit batches, but they help with the memory footprint.

@@ -60,7 +60,7 @@ class BasicLinkedEntity(BaseModel):
     name: str | None
 
 class LinkedIssue(BasicLinkedEntity):
-    issue_number: str
+    issue_number: str | None
 
 class SiteLinkedEntity(BasicLinkedEntity):
     site_detail_url: str
@@ -68,7 +68,7 @@ class SiteLinkedEntity(BasicLinkedEntity):
 class BaseEntity(BaseModel):
     aliases: str | None = None
     api_detail_url: str
-    date_added: Annotated[str, "Date format is %Y-%m-%d %H:%M:%S - Data is UTC-7/8 (PDT/PST depending on time of year)"]  # noqa: E501
+    date_added: Annotated[str, "Date format is %Y-%m-%d %H:%M:%S - Data is UTC-7/8 (PDT/PST depending on time of year)"]
     date_last_updated: Annotated[str, "Date format is %Y-%m-%d %H:%M:%S - Data is UTC-7/8 (PDT/PST depending on time of year)"]  # noqa: E501
     deck: str | None = None
     description: str | None = None
@@ -148,7 +148,7 @@ class DetailIssue(BaseIssue):
     team_disbanded_in: list[SiteLinkedEntity] = []
 
 class BaseLocation(BaseEntity):
-    count_of_issue_appearances: int
+    count_of_issue_appearances: int | None
     first_appeared_in_issue: LinkedIssue | None
     start_year: str | None
 
@@ -162,7 +162,7 @@ class DetailLocation(BaseLocation):
 # https://github.com/falo2k/fakevine/issues/1
 
 class BaseObject(BaseEntity):
-    count_of_issue_appearances: int
+    count_of_issue_appearances: int | None
     first_appeared_in_issue: LinkedIssue | None
     start_year: str | None
 

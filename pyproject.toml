@@ -51,7 +51,7 @@ dev = [
 ]
 
 [tool.ruff]
-line-length = 120
+line-length = 140
 
 [tool.ruff.lint]
 select = ["ALL"]
