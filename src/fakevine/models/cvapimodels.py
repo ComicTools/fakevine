@@ -62,10 +62,15 @@ class BasicLinkedEntity(BaseModel):
     name: str | None
 
     # Equality and Hash functions defined for quick deduplication of references
-    def __eq__(self, other: BasicLinkedEntity) -> bool:  # noqa: D105
+    def __eq__(self, other: object) -> bool:
+        """Equality check assumes ID uniqueness for data deduplication."""
+        if not isinstance(other, BasicLinkedEntity):
+            return NotImplemented
+
         return self.id == other.id
 
-    def __hash__(self) -> int:  # noqa: D105
+    def __hash__(self) -> int:
+        """Hash check assumes ID uniqueness for data deduplication."""
         return self.id
 
 class LinkedIssue(BasicLinkedEntity):
