@@ -239,12 +239,26 @@ class CVRouter:
         if params.query is None:
             return CVRouter.OBJECT_NOT_FOUND
 
+        search_models: list[type[cvapimodels.BaseModel]]= [
+            cvapimodels.BaseCharacter,
+            cvapimodels.BaseConcept,
+            cvapimodels.BaseIssue,
+            cvapimodels.BaseObject,
+            cvapimodels.BaseOrigin,
+            cvapimodels.BasePerson,
+            cvapimodels.BasePublisher,
+            cvapimodels.BaseStoryArc,
+            cvapimodels.BaseTeam,
+            cvapimodels.BaseVolume,
+            cvapimodels.BaseEntity]
+
+        params.sort = validate_sort_order(params.sort,
+            model=search_models)
+        params.field_list = validate_field_list(params.field_list,
+            model=search_models)
+
         if params.field_list not in [None, '']:
             params.field_list = ','.join([*params.field_list.split(','), 'resource_type'])
-
-        # FIX@falo2k: Need special case validation to consider the full set of potential response types
-        #params.sort = validate_sort_order(params.sort, cvapimodels.BaseVolume)
-        #params.field_list = validate_field_list(params.field_list, cvapimodels.BaseSearch)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.search)
 

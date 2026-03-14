@@ -29,16 +29,20 @@ class FieldType(Enum):
     DateTime = 3
 
 ## Utility functions for request parameter validation
-def split_and_validate_field_list(value: str | None, model: type[BaseModel]) -> list[str] | None:
+def split_and_validate_field_list(value: str | None, model: type[BaseModel] | list[type[BaseModel]]) -> list[str] | None:
     """Transform field_list in request params using CV's logic."""
     if value is None or value == "":
         return None
 
-    fields = [field for field in value.split(',') if field in model.model_fields]
+    if isinstance(model, list):
+        all_model_fields = [field for m in model for field in m.model_fields]
+        fields = [field for field in value.split(',') if field in all_model_fields]
+    else:
+        fields = [field for field in value.split(',') if field in model.model_fields]
 
     return None if len(fields) == 0 else fields
 
-def validate_field_list(value: str | None, model: type[BaseModel]) -> str | None:
+def validate_field_list(value: str | None, model: type[BaseModel] | list[type[BaseModel]]) -> str | None:
     """Validate field_list in request params using CV's logic."""
     split = split_and_validate_field_list(value, model)
 
@@ -105,7 +109,7 @@ def validate_filter_list(value: str | None, model: type[BaseModel]) -> str | Non
 
     return None if split is None else ','.join(split)
 
-def split_and_validate_sort_order(value: str | None, model: type[BaseModel]) -> tuple[str, str] | None:
+def split_and_validate_sort_order(value: str | None, model: type[BaseModel] | list[type[BaseModel]]) -> tuple[str, str] | None:
     """Transform sort in request params using CV's logic.
 
     From observation, CV does consider comma delimited lists, but then ignores all
@@ -115,7 +119,12 @@ def split_and_validate_sort_order(value: str | None, model: type[BaseModel]) -> 
         return None
 
     items = []
-    sortable = [field for field in model.model_fields if FieldType.Sortable in model.model_fields[field].metadata]
+
+    if isinstance(model, list):
+        sortable = [field for m in model for field in m.model_fields if FieldType.Sortable in m.model_fields[field].metadata]
+    else:
+        sortable = [field for field in model.model_fields if FieldType.Sortable in model.model_fields[field].metadata]
+
     for sorter in value.split(','):
         split_sort = sorter.split(':',1)
         if len(split_sort) < 2 or split_sort[1] == '':  # noqa: PLR2004
@@ -131,7 +140,7 @@ def split_and_validate_sort_order(value: str | None, model: type[BaseModel]) -> 
 
     return None if len(items) == 0 else items[-1]
 
-def validate_sort_order(value: str | None, model: type[BaseModel]) -> str | None:
+def validate_sort_order(value: str | None, model: type[BaseModel] | list[type[BaseModel]]) -> str | None:
     """Validate sort_order in request params using CV's logic."""
     validated = split_and_validate_sort_order(value, model)
 
