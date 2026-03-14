@@ -1,7 +1,14 @@
 # ruff: noqa: D101, FIX002
+import datetime
+from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+)
 
 CV_STATUS_CODES: dict[int, str] = {
     1:      "OK",
@@ -14,22 +21,107 @@ CV_STATUS_CODES: dict[int, str] = {
     107:    "Rate limit exceeded.  Slow down cowboy.",#107
 }
 
+class FieldType(Enum):
+    """An enum to mark fields in the model metadata for validation functions."""
+
+    Sortable = 1
+    Filterable = 2
+    DateTime = 3
+
+## Utility functions for request parameter validation
+def split_and_validate_field_list(value: str | None, model: type[BaseModel]) -> list[str] | None:
+    """Transform field_list in request params using CV's logic."""
+    if value is None or value == "":
+        return None
+
+    fields = [field for field in value.lower().split(',') if field in model.model_fields]
+
+    return None if len(fields) == 0 else fields
+
+def validate_field_list(value: str | None, model: type[BaseModel]) -> str | None:
+    """Validate field_list in request params using CV's logic."""
+    split = split_and_validate_field_list(value, model)
+
+    return None if split is None else ','.join(split)
+
+def split_and_validate_filter_list(value: str | None, model: type[BaseModel]) -> list[str] | None:
+    """Transform field_list in request params using CV's logic."""
+    if value is None or value == "":
+        return None
+
+    items = []
+    filterable: list[str] = [field for field in model.model_fields if FieldType.Filterable in model.model_fields[field].metadata]
+    datetime_fields: list[str] = [field for field in model.model_fields if FieldType.DateTime in model.model_fields[field].metadata]
+    for filter_string in value.lower().split(','):
+        split_sort = filter_string.split(':',1)
+        if len(split_sort) < 2 or split_sort[1] == '':  # noqa: PLR2004
+            continue
+
+        # At some point could test behaviour for what happens if only one half is invalid.
+        try:
+            if split_sort[0] in datetime_fields:
+                dates = split_sort[1].split('|',maxsplit=1)
+                for date_string in dates:
+                    datetime.datetime.strptime(date_string,"%Y-%m-%d %H:%M:%S")  # noqa: DTZ007
+        except ValueError:
+            continue
+
+        if split_sort[0] in filterable:
+            items.append(':'.join(split_sort))
+
+    return None if len(items) == 0 else items
+
+def validate_filter_list(value: str | None, model: type[BaseModel]) -> str | None:
+    """Validate field_list in request params using CV's logic."""
+    split = split_and_validate_filter_list(value, model)
+
+    return None if split is None else ','.join(split)
+
+def split_and_validate_sort_order(value: str | None, model: type[BaseModel]) -> tuple[str, str] | None:
+    """Transform sort in request params using CV's logic.
+
+    From observation, CV does consider comma delimited lists, but then ignores all
+    but the last valid sort element.  There is no multisort.  ASC is default.
+    """
+    if value is None or value == "":
+        return None
+
+    items = []
+    sortable = [field for field in model.model_fields if FieldType.Sortable in model.model_fields[field].metadata]
+    for sorter in value.lower().split(','):
+        split_sort = sorter.split(':',1)
+        if len(split_sort) < 2:  # noqa: PLR2004
+            split_sort.append('asc')
+        if split_sort[1] not in ['asc', 'desc']:
+            split_sort[1] = 'asc'
+
+        if split_sort[0] in sortable:
+            items.append(tuple(split_sort))
+
+    return None if len(items) == 0 else items[-1]
+
+def validate_sort_order(value: str | None, model: type[BaseModel]) -> str | None:
+    """Validate sort_order in request params using CV's logic."""
+    validated = split_and_validate_sort_order(value, model)
+
+    return None if validated is None else f'{validated[0]}:{validated[1]}'
+
 ## Request Models
 class CommonParams(BaseModel):
     api_key: str | None = None
     format: Literal['json', 'xml', 'jsonp'] = 'json'
-    field_list: Annotated[list[str], "Comma delimited list of fields"] | None = None
+    field_list: Annotated[str | None, "Comma delimited list of fields"] = None
 
 class FilterParams(CommonParams):
     limit: int = Field(100, gt=0, le=100)
     offset: int = Field(0, ge=0)
-    sort: Annotated[str, "Sort by field and direction (asc/desc) in the format field:asc"] | None = "id:asc"
-    filter: str | None = None
+    sort: Annotated[str | None, "Sort by field and direction (asc/desc) in the format field:asc"] = "id:asc"
+    filter: Annotated[str | None, "Filters to apply.  Comma delimited of the form field:value, or field:valA|valB for date ranges"] = None
 
 class SearchParams(CommonParams):
     limit: int = Field(10, gt=0, le=10)
     offset: int = Field(0, ge=0)
-    sort: str | None = "id:asc"
+    sort: Annotated[str | None, "Sort by field and direction (asc/desc) in the format field:asc"] = "id:asc"
     query: str | None = None
 
 
@@ -82,13 +174,17 @@ class SiteLinkedEntity(BasicLinkedEntity):
 class BaseEntity(BaseModel):
     aliases: str | None = None
     api_detail_url: str
-    date_added: Annotated[str, "Date format is %Y-%m-%d %H:%M:%S - Data is UTC-7/8 (PDT/PST depending on time of year)"]
-    date_last_updated: Annotated[str, "Date format is %Y-%m-%d %H:%M:%S - Data is UTC-7/8 (PDT/PST depending on time of year)"]  # noqa: E501
+    date_added: Annotated[str,
+        "Date format is %Y-%m-%d %H:%M:%S - Data is UTC-7/8 (PDT/PST depending on time of year)",
+        FieldType.Sortable, FieldType.Filterable, FieldType.DateTime]
+    date_last_updated: Annotated[str,
+        "Date format is %Y-%m-%d %H:%M:%S - Data is UTC-7/8 (PDT/PST depending on time of year)",
+        FieldType.Sortable, FieldType.Filterable, FieldType.DateTime]
     deck: str | None = None
     description: str | None = None
-    id: int
+    id: Annotated[int, FieldType.Sortable, FieldType.Filterable]
     image: dict[str, str | None] | None = None
-    name: str | None = None
+    name: Annotated[str | None, FieldType.Sortable, FieldType.Filterable] = None
     site_detail_url: str
 
 class BaseCharacter(BaseEntity):

@@ -6,9 +6,17 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from loguru import logger
 from pydantic_core import ValidationError
-from rich.json import JSON
 
-from fakevine.models.cvapimodels import CommonParams, CVResponse, FilterParams, SearchParams
+from fakevine.models import cvapimodels
+from fakevine.models.cvapimodels import (
+    CommonParams,
+    CVResponse,
+    FilterParams,
+    SearchParams,
+    validate_field_list,
+    validate_filter_list,
+    validate_sort_order,
+)
 from fakevine.trunks.comic_trunk import (
     AuthenticationError,
     ComicTrunk,
@@ -144,7 +152,7 @@ class CVRouter:
                 name=route[2],
                 include_in_schema=route[3])
 
-    def _fetch_response(self, params: CommonParams, trunk_method: Callable | None, item_id: str | None = None) -> Response:  # noqa: E501
+    def _fetch_response(self, params: CommonParams, trunk_method: Callable | None, item_id: str | None = None) -> Response:
         """Handle passing parameters to the ComicTrunk and processing the response into the correct format.
 
         Args:
@@ -179,7 +187,7 @@ class CVRouter:
             except ValidationError as ex:
                 for ex_error in ex.errors():
                     error_loc = '->'.join(list(ex_error["loc"]))  # ty:ignore[no-matching-overload]
-                    input_summary = f"{str(ex_error["input"])[:100]}{' ...' if len(str(ex_error["input"])) > 100 else ''}"  # noqa: E501, PLR2004
+                    input_summary = f"{str(ex_error["input"])[:100]}{' ...' if len(str(ex_error["input"])) > 100 else ''}"  # noqa: PLR2004
                     error_msg = f"{ex_error["msg"]}: {error_loc}: {input_summary}"
                     logger.error(error_msg)
                 return JSONResponse(
@@ -190,6 +198,10 @@ class CVRouter:
         return data
 
     async def _get_volumes(self, params: Annotated[FilterParams, Query()]) -> Response:
+        params.sort = validate_sort_order(params.sort, cvapimodels.BaseVolume)
+        params.field_list = validate_field_list(params.field_list, cvapimodels.BaseVolume)
+        params.filter = validate_filter_list(params.filter, cvapimodels.BaseVolume)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.volumes)
 
     async def _get_volume(self, volume_id: str, params: Annotated[CommonParams, Query()]) -> Response:
