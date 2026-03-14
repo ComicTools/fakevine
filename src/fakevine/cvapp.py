@@ -1,8 +1,8 @@
-import traceback
 from typing import TYPE_CHECKING, Annotated, Literal
 
-from fastapi import APIRouter, Query, status
+from fastapi import FastAPI, Query, Request, status
 from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from loguru import logger
 from pydantic_core import ValidationError
@@ -31,17 +31,18 @@ from fakevine.trunks.comic_trunk import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-class CVRouter:
-    """Router for ComicVine API compatible endpoints.
+
+class CVApp:
+    """FastAPI App for ComicVine API compatible endpoints.
 
     Handles routing and processing of requests to backend ComicTrunk.
 
     Attributes
     ----------
-    OBJECT_NOT_FOUND, INVALID_API_KEY, RATE_LIMITED, REQUEST_LIMIT_BREACH : Response
-        Eesponses to match CV's HTTP status codes and content.
-    router : APIRouter
-        FastAPI router instance.
+    OBJECT_NOT_FOUND, INVALID_API_KEY, RATE_LIMITED, REQUEST_LIMIT_BREACH, URL_FORMAT_ERROR : Response
+        Responses to match CV's HTTP status codes and content.
+    app : FastAPI
+        FastAPI app instance.
     api_key : str | None
         Optional API key for basic authentication.
     trunk : ComicTrunk
@@ -73,7 +74,7 @@ class CVRouter:
         content={key:value for key, value in
             jsonable_encoder(CVResponse(limit=0, status_code=102)).items() if key != 'version'})
 
-    router: APIRouter
+    app: FastAPI
     api_key: str | None = None
     trunk: ComicTrunk
 
@@ -87,16 +88,27 @@ class CVRouter:
         """
         self.api_key = api_key
         self.trunk = trunk
-        self.router = APIRouter()
+        self.app = FastAPI(exception_handlers={RequestValidationError : self._validation_exception_handler})
         self._attach_routes()
 
         self._exception_responses = {
-            RateLimitError : CVRouter.RATE_LIMITED,
-            AuthenticationError : CVRouter.INVALID_API_KEY,
-            RequestLimitError : CVRouter.REQUEST_LIMIT_BREACH,
+            RateLimitError : CVApp.RATE_LIMITED,
+            AuthenticationError : CVApp.INVALID_API_KEY,
+            RequestLimitError : CVApp.REQUEST_LIMIT_BREACH,
             GatewayError: HTMLResponse(status_code=status.HTTP_502_BAD_GATEWAY,
                 content="<html><title>502 Bad Gateway</title><body>502 Bad Gateway</body></html>"),
         }
+
+    async def _validation_exception_handler(self, request: Request, exc: RequestValidationError) -> Response:  # noqa: ARG002
+        message = """
+            <html>
+                <title>Random CV Webpage</title>
+                <body>
+                    <b>Validation errors:</b>
+        """
+        for error in exc.errors():
+            message += f"<br />Field: {error['loc']}, Error: {error['msg']}"
+        return HTMLResponse(status_code=status.HTTP_200_OK, content=f"{message}</body></html>")
 
     def _attach_routes(self) -> None:
         routes =[
@@ -143,18 +155,19 @@ class CVRouter:
             ('/volumes', self._get_volumes, "Volume Search", True),
             ('/volume/4050-{volume_id}', self._get_volume, "Volume Detail", True),
             ('/{any_id}/{other_id}', self._get_url_format_error, "URL Format Error", False),
+            ('/{any_id}/{other_id}-{id_other}', self._get_url_format_error, "URL Format Error", False),
             ('/*', self._get_undefined, "Catch All", False),
         ]
 
         for route in routes:
-            self.router.add_api_route(
+            self.app.add_api_route(
                 methods=['GET'],
                 path=route[0],
                 endpoint=route[1],
                 name=route[2],
                 include_in_schema=route[3])
 
-    def _fetch_response(self, params: CommonParams, trunk_method: Callable | None, item_id: str | None = None) -> Response:
+    def _fetch_response(self, params: CommonParams, trunk_method: Callable | None, item_id: int | None = None) -> Response:
         """Handle passing parameters to the ComicTrunk and processing the response into the correct format.
 
         Args:
@@ -167,12 +180,12 @@ class CVRouter:
 
         """
         if self.api_key is not None and params.api_key is None:
-            return CVRouter.INVALID_API_KEY
+            return CVApp.INVALID_API_KEY
 
         # TODO@falo2k:  Process conversion of responses into other formats
         # https://github.com/falo2k/fakevine/issues/2
         if params.format != "json":
-            return CVRouter.OBJECT_NOT_FOUND
+            return CVApp.OBJECT_NOT_FOUND
 
         if trunk_method is None:
             data = self.DEADEND_RESPONSE
@@ -188,10 +201,9 @@ class CVRouter:
             except (RateLimitError, AuthenticationError, RequestLimitError, GatewayError) as ex:
                 return self._exception_responses[type(ex)]  # ty:ignore[invalid-argument-type]
             except UnsupportedResponseError as ex:
-                error_msg = f"Response not handled: {ex}"
+                error_msg = f"Response not handled ({trunk_method.__name__}): {ex}"  # ty:ignore[unresolved-attribute]
                 logger.error(error_msg)
-                exception_html = f'<html><title>Unsupported Feature</title><body>{traceback.format_exc()}</body></html>'
-                return HTMLResponse(status_code=status.HTTP_501_NOT_IMPLEMENTED, content=exception_html)
+                return JSONResponse(status_code=status.HTTP_501_NOT_IMPLEMENTED, content={'error':error_msg})
             except ValidationError as ex:
                 for ex_error in ex.errors():
                     error_loc = '->'.join(list(ex_error["loc"]))  # ty:ignore[no-matching-overload]
@@ -232,12 +244,12 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.volumes)
 
-    async def _get_volume(self, volume_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_volume(self, volume_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         return self._fetch_response(params=params, trunk_method=self.trunk.volume, item_id=volume_id)
 
     async def _get_search(self, params: Annotated[SearchParams, Query()]) -> Response:
         if params.query is None:
-            return CVRouter.OBJECT_NOT_FOUND
+            return CVApp.OBJECT_NOT_FOUND
 
         search_models: list[type[cvapimodels.BaseModel]]= [
             cvapimodels.BaseCharacter,
@@ -269,7 +281,7 @@ class CVRouter:
             params=CommonParams.model_validate({'format':format, 'api_key': api_key}),
             trunk_method= self.trunk.types)
 
-    async def _get_character(self, character_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_character(self, character_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailCharacter)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.character, item_id=character_id)
@@ -281,7 +293,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.characters)
 
-    async def _get_concept(self, concept_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_concept(self, concept_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailConcept)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.concept, item_id=concept_id)
@@ -293,7 +305,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.concepts)
 
-    async def _get_episode(self, episode_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_episode(self, episode_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.BaseEntity)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.episode, item_id=episode_id)
@@ -305,7 +317,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.episodes)
 
-    async def _get_issue(self, issue_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_issue(self, issue_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailIssue)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.issue, item_id=issue_id)
@@ -317,7 +329,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.issues)
 
-    async def _get_location(self, location_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_location(self, location_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailLocation)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.location, item_id=location_id)
@@ -329,7 +341,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.locations)
 
-    async def _get_movie(self, movie_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_movie(self, movie_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.BaseEntity)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.movie, item_id=movie_id)
@@ -341,7 +353,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.movies)
 
-    async def _get_object(self, object_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_object(self, object_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailObject)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.object, item_id=object_id)
@@ -353,7 +365,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.objects)
 
-    async def _get_origin(self, origin_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_origin(self, origin_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailOrigin)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.origin, item_id=origin_id)
@@ -365,7 +377,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.origins)
 
-    async def _get_person(self, person_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_person(self, person_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailPerson)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.person, item_id=person_id)
@@ -377,7 +389,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.people)
 
-    async def _get_power(self, power_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_power(self, power_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailPower)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.power, item_id=power_id)
@@ -389,7 +401,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.powers)
 
-    async def _get_publisher(self, publisher_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_publisher(self, publisher_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailPublisher)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.publisher, item_id=publisher_id)
@@ -401,7 +413,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.publishers)
 
-    async def _get_series(self, series_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_series(self, series_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.BaseEntity)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.series, item_id=series_id)
@@ -413,7 +425,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.series_list)
 
-    async def _get_story_arc(self, story_arc_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_story_arc(self, story_arc_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailStoryArc)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.story_arc, item_id=story_arc_id)
@@ -425,7 +437,7 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.story_arcs)
 
-    async def _get_team(self, team_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_team(self, team_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailTeam)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.team, item_id=team_id)
@@ -437,19 +449,19 @@ class CVRouter:
 
         return self._fetch_response(params=params, trunk_method=self.trunk.teams)
 
-    async def _get_video(self, video_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_video(self, video_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         return self._fetch_response(params=params, trunk_method=self.trunk.video, item_id=video_id)
 
     async def _get_videos(self, params: Annotated[FilterParams, Query()]) -> Response:
         return self._fetch_response(params=params, trunk_method=self.trunk.videos)
 
-    async def _get_video_type(self, video_type_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_video_type(self, video_type_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         return self._fetch_response(params=params, trunk_method=self.trunk.video_type, item_id=video_type_id)
 
     async def _get_video_types(self, params: Annotated[FilterParams, Query()]) -> Response:
         return self._fetch_response(params=params, trunk_method=self.trunk.video_types)
 
-    async def _get_video_category(self, video_category_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+    async def _get_video_category(self, video_category_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         return self._fetch_response(params=params, trunk_method=self.trunk.video_category, item_id=video_category_id)
 
     async def _get_video_categories(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -458,11 +470,11 @@ class CVRouter:
     async def _get_cv_deadend(self, params: Annotated[CommonParams, Query()]) -> Response:
         return self._fetch_response(params=params, trunk_method=None)
 
-    async def _get_object_not_found(self, item_id: str | None, params: Annotated[CommonParams, Query()]) -> Response:
-        return self._fetch_response(params=params, trunk_method=lambda *_, **__: self.OBJECT_NOT_FOUND, item_id=item_id)
+    async def _get_object_not_found(self, params: Annotated[CommonParams, Query()]) -> Response:
+        return self._fetch_response(params=params, trunk_method=lambda *_, **__: self.OBJECT_NOT_FOUND, item_id=None)
 
-    async def _get_url_format_error(self, any_id: str | None, params: Annotated[CommonParams, Query()]) -> Response:
-        return self._fetch_response(params=params, trunk_method=lambda *_, **__: self.URL_FORMAT_ERROR, item_id=any_id)
+    async def _get_url_format_error(self, params: Annotated[CommonParams, Query()]) -> Response:
+        return self._fetch_response(params=params, trunk_method=lambda *_, **__: self.URL_FORMAT_ERROR, item_id=None)
 
     async def _get_undefined(self) -> HTMLResponse:
         return HTMLResponse(content="Unknown route", status_code=status.HTTP_404_NOT_FOUND)
