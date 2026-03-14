@@ -12,7 +12,9 @@ from fakevine.models.cvapimodels import (
     CommonParams,
     CVResponse,
     FilterParams,
+    MultiResponse,
     SearchParams,
+    SingleResponse,
     validate_field_list,
     validate_filter_list,
     validate_sort_order,
@@ -176,7 +178,13 @@ class CVRouter:
             data = self.DEADEND_RESPONSE
         else:
             try:
+                field_list = None
+                if hasattr(params, 'field_list') and params.field_list is not None:
+                    field_list = params.field_list
+                    params.field_list = None
+
                 data = trunk_method(params=params) if item_id is None else trunk_method(item_id=item_id, params=params)
+
             except (RateLimitError, AuthenticationError, RequestLimitError, GatewayError) as ex:
                 return self._exception_responses[type(ex)]  # ty:ignore[invalid-argument-type]
             except UnsupportedResponseError as ex:
@@ -195,6 +203,26 @@ class CVRouter:
                     content=jsonable_encoder({"errors": ex.errors()}),
                 )
 
+            # TODO@falo2k: I'm not really a fan of doing this in this way, but it's currently the best/simplest comromise.
+            # https://github.com/falo2k/fakevine/issues/19
+            if isinstance(data, (MultiResponse, SingleResponse)):
+                if field_list is not None and (isinstance(data, MultiResponse)):
+                    json_data = jsonable_encoder(data)
+                    for result_index in range(len(json_data['results'])):
+                        json_data['results'][result_index] = \
+                            {k:v for k,v in json_data['results'][result_index].items() if k in field_list.split(',')}
+                    return json_data
+
+                if field_list is not None and (isinstance(data, SingleResponse)):
+                    json_data = jsonable_encoder(data)
+                    json_data['results'] = {k:v for k,v in json_data['results'].items() if k in field_list.split(',')}
+                    return json_data
+
+                return data
+
+            # TODO@falo2k:  Process conversion of responses into other formats
+            # https://github.com/falo2k/fakevine/issues/2
+
         return data
 
     async def _get_volumes(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -211,8 +239,12 @@ class CVRouter:
         if params.query is None:
             return CVRouter.OBJECT_NOT_FOUND
 
-        params.sort = validate_sort_order(params.sort, cvapimodels.BaseVolume)
-        params.field_list = validate_field_list(params.field_list, cvapimodels.BaseVolume)
+        if params.field_list not in [None, '']:
+            params.field_list = ','.join([*params.field_list.split(','), 'resource_type'])
+
+        # FIX@falo2k: Need special case validation to consider the full set of potential response types
+        #params.sort = validate_sort_order(params.sort, cvapimodels.BaseVolume)
+        #params.field_list = validate_field_list(params.field_list, cvapimodels.BaseSearch)
 
         return self._fetch_response(params=params, trunk_method=self.trunk.search)
 
@@ -224,6 +256,8 @@ class CVRouter:
             trunk_method= self.trunk.types)
 
     async def _get_character(self, character_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.DetailCharacter)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.character, item_id=character_id)
 
     async def _get_characters(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -234,6 +268,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.characters)
 
     async def _get_concept(self, concept_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.DetailConcept)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.concept, item_id=concept_id)
 
     async def _get_concepts(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -244,6 +280,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.concepts)
 
     async def _get_episode(self, episode_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.BaseEntity)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.episode, item_id=episode_id)
 
     async def _get_episodes(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -254,6 +292,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.episodes)
 
     async def _get_issue(self, issue_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.DetailIssue)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.issue, item_id=issue_id)
 
     async def _get_issues(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -264,6 +304,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.issues)
 
     async def _get_location(self, location_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.DetailLocation)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.location, item_id=location_id)
 
     async def _get_locations(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -274,6 +316,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.locations)
 
     async def _get_movie(self, movie_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.BaseEntity)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.movie, item_id=movie_id)
 
     async def _get_movies(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -284,6 +328,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.movies)
 
     async def _get_object(self, object_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.DetailObject)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.object, item_id=object_id)
 
     async def _get_objects(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -294,6 +340,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.objects)
 
     async def _get_origin(self, origin_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.DetailOrigin)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.origin, item_id=origin_id)
 
     async def _get_origins(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -304,6 +352,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.origins)
 
     async def _get_person(self, person_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.DetailPerson)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.person, item_id=person_id)
 
     async def _get_people(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -314,6 +364,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.people)
 
     async def _get_power(self, power_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.DetailPower)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.power, item_id=power_id)
 
     async def _get_powers(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -324,6 +376,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.powers)
 
     async def _get_publisher(self, publisher_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.DetailPublisher)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.publisher, item_id=publisher_id)
 
     async def _get_publishers(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -334,6 +388,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.publishers)
 
     async def _get_series(self, series_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.BaseEntity)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.series, item_id=series_id)
 
     async def _get_series_list(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -344,6 +400,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.series_list)
 
     async def _get_story_arc(self, story_arc_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.DetailStoryArc)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.story_arc, item_id=story_arc_id)
 
     async def _get_story_arcs(self, params: Annotated[FilterParams, Query()]) -> Response:
@@ -354,6 +412,8 @@ class CVRouter:
         return self._fetch_response(params=params, trunk_method=self.trunk.story_arcs)
 
     async def _get_team(self, team_id: str, params: Annotated[CommonParams, Query()]) -> Response:
+        params.field_list = validate_field_list(params.field_list, cvapimodels.DetailTeam)
+
         return self._fetch_response(params=params, trunk_method=self.trunk.team, item_id=team_id)
 
     async def _get_teams(self, params: Annotated[FilterParams, Query()]) -> Response:
