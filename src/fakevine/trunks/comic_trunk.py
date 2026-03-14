@@ -34,7 +34,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def volume(self, item_id: str, params: CommonParams) -> SingleResponse[DetailVolume]:
+    def volume(self, item_id: int, params: CommonParams) -> SingleResponse[DetailVolume]:
         ...
 
     @abstractmethod
@@ -42,7 +42,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def character(self, item_id: str, params: CommonParams) -> SingleResponse[DetailCharacter]:
+    def character(self, item_id: int, params: CommonParams) -> SingleResponse[DetailCharacter]:
         ...
 
     @abstractmethod
@@ -50,7 +50,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def concept(self, item_id: str, params: CommonParams) -> SingleResponse[DetailConcept]:
+    def concept(self, item_id: int, params: CommonParams) -> SingleResponse[DetailConcept]:
         ...
 
     @abstractmethod
@@ -58,7 +58,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def episode(self, item_id: str, params: CommonParams) -> CVResponse:
+    def episode(self, item_id: int, params: CommonParams) -> CVResponse:
         ...
 
     @abstractmethod
@@ -66,7 +66,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def issue(self, item_id: str, params: CommonParams) -> SingleResponse[DetailIssue]:
+    def issue(self, item_id: int, params: CommonParams) -> SingleResponse[DetailIssue]:
         ...
 
     @abstractmethod
@@ -74,7 +74,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def location(self, item_id: str, params: CommonParams) -> SingleResponse[DetailLocation]:
+    def location(self, item_id: int, params: CommonParams) -> SingleResponse[DetailLocation]:
         ...
 
     @abstractmethod
@@ -82,7 +82,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def movie(self, item_id: str, params: CommonParams) -> CVResponse:
+    def movie(self, item_id: int, params: CommonParams) -> CVResponse:
         ...
 
     @abstractmethod
@@ -90,7 +90,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def object(self, item_id: str, params: CommonParams) -> SingleResponse[DetailObject]:
+    def object(self, item_id: int, params: CommonParams) -> SingleResponse[DetailObject]:
         ...
 
     @abstractmethod
@@ -98,7 +98,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def origin(self, item_id: str, params: CommonParams) -> SingleResponse[DetailOrigin]:
+    def origin(self, item_id: int, params: CommonParams) -> SingleResponse[DetailOrigin]:
         ...
 
     @abstractmethod
@@ -106,7 +106,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def person(self, item_id: str, params: CommonParams) -> SingleResponse[DetailPerson]:
+    def person(self, item_id: int, params: CommonParams) -> SingleResponse[DetailPerson]:
         ...
 
     @abstractmethod
@@ -114,7 +114,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def power(self, item_id: str, params: CommonParams) -> SingleResponse[DetailPower]:
+    def power(self, item_id: int, params: CommonParams) -> SingleResponse[DetailPower]:
         ...
 
     @abstractmethod
@@ -122,7 +122,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def publisher(self, item_id: str, params: CommonParams) -> SingleResponse[DetailPublisher]:
+    def publisher(self, item_id: int, params: CommonParams) -> SingleResponse[DetailPublisher]:
         ...
 
     @abstractmethod
@@ -130,7 +130,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def series(self, item_id: str, params: CommonParams) -> CVResponse:
+    def series(self, item_id: int, params: CommonParams) -> CVResponse:
         ...
 
     @abstractmethod
@@ -138,7 +138,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def story_arc(self, item_id: str, params: CommonParams) -> SingleResponse[DetailStoryArc]:
+    def story_arc(self, item_id: int, params: CommonParams) -> SingleResponse[DetailStoryArc]:
         ...
 
     @abstractmethod
@@ -146,7 +146,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def team(self, item_id: str, params: CommonParams) -> SingleResponse[DetailTeam]:
+    def team(self, item_id: int, params: CommonParams) -> SingleResponse[DetailTeam]:
         ...
 
     @abstractmethod
@@ -154,7 +154,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def video(self, item_id: str, params: CommonParams) -> CVResponse:
+    def video(self, item_id: int, params: CommonParams) -> CVResponse:
         ...
 
     @abstractmethod
@@ -162,7 +162,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def video_type(self, item_id: str, params: CommonParams) -> CVResponse:
+    def video_type(self, item_id: int, params: CommonParams) -> CVResponse:
         ...
 
     @abstractmethod
@@ -170,7 +170,7 @@ class ComicTrunk(ABC):
         ...
 
     @abstractmethod
-    def video_category(self, item_id: str, params: CommonParams) -> CVResponse:
+    def video_category(self, item_id: int, params: CommonParams) -> CVResponse:
         ...
 
     @abstractmethod

@@ -4,10 +4,9 @@ import sys
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
 from loguru import logger
 
-from fakevine.cvrouter import CVRouter
+from fakevine.cvapp import CVApp
 from fakevine.trunks.simple_cache_trunk import SimpleCacheTrunk
 from fakevine.trunks.static_db_trunk import StaticDBTrunk
 
@@ -18,8 +17,6 @@ def main() -> None:
     Sets up the FastAPI app with the FakeVine router, and the configured ComicTrunk backend.
     Intercepts uvicorn logging to loguru.
     """
-    app = FastAPI()
-
     log_interception()
 
     comic_trunk = os.environ.get("COMIC_TRUNK", "Cache").lower()
@@ -34,7 +31,7 @@ def main() -> None:
             except (ValueError, TypeError):
                 cache_expiry = 24*60
 
-            cv_router = CVRouter(trunk=SimpleCacheTrunk(
+            cv_app = CVApp(trunk=SimpleCacheTrunk(
                 cv_api_key=os.environ["CACHE_CV_API_KEY"],
                 cache_filename=os.environ.get("CACHE_DB_PATH"),
                 cache_expiry_minutes=cache_expiry,
@@ -48,7 +45,7 @@ def main() -> None:
                 logger.error(f'{db_path} does not exist / is not a file')
                 sys.exit(1)
 
-            cv_router = CVRouter(trunk=StaticDBTrunk(
+            cv_app = CVApp(trunk=StaticDBTrunk(
                 database_path=Path(db_path)),
                 api_key=os.environ.get("API_KEY"))
 
@@ -56,15 +53,13 @@ def main() -> None:
             logger.error("JSON Trunk not yet implemented")
             sys.exit(1)
 
-    app.include_router(cv_router.router)
-
     try:
         listen_port = int(os.environ.get("LISTEN_PORT"))  # ty:ignore[invalid-argument-type]
     except (ValueError, TypeError):
         listen_port = 8463
 
     uvicorn.run(
-        app,
+        cv_app.app,
         host=os.environ.get("LISTEN_INTERFACE", '0.0.0.0'),  # noqa: S104
         port=listen_port,
         log_config=None,

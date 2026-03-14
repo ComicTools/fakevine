@@ -1,13 +1,13 @@
-"""Tests for the fakevine ComicVine router."""
+"""Tests for the fakevine ComicVine app."""
 # ruff: noqa: S101, D103, ANN201, PLR2004, SLF001
 import json
 
 import pytest
-from fastapi import FastAPI, status
+from fastapi import status
 from fastapi.testclient import TestClient
 from mockito import mock, when
 
-from fakevine.cvrouter import CVRouter
+from fakevine.cvapp import CVApp
 from fakevine.models import cvapimodels as m
 from fakevine.trunks.comic_trunk import (
     AuthenticationError,
@@ -33,16 +33,16 @@ def test_fetch_response_trunk_returns_model():
     trunk = mock(ComicTrunk)
     when(trunk).volumes(...).thenReturn(m.CVResponse())
 
-    router = CVRouter(trunk=trunk)
+    app = CVApp(trunk=trunk)
 
-    res = router._fetch_response(params=m.FilterParams(), trunk_method=trunk.volumes)
+    res = app._fetch_response(params=m.FilterParams(), trunk_method=trunk.volumes)
     assert isinstance(res, m.CVResponse)
 
 
 def test_fetch_response_deadend_when_no_trunk_method():
     trunk = mock(ComicTrunk)
-    router = CVRouter(trunk=trunk)
-    dead = router._fetch_response(params=m.CommonParams(), trunk_method=None)
+    app = CVApp(trunk=trunk)
+    dead = app._fetch_response(params=m.CommonParams(), trunk_method=None)
     assert dead.status_code == status.HTTP_200_OK
     assert _json_from_response(dead) == {"error": "OK", "limit": None, "offset": None, "number_of_page_results": 0,
                 "number_of_total_results": 0, "status_code": 1, "results": [], "version": "1.0" }
@@ -61,8 +61,8 @@ def test_exception_mapping_from_trunk(exc: Exception, expected_status: int):
     trunk = mock(ComicTrunk)
     when(trunk).volumes(...).thenRaise(exc)
 
-    router = CVRouter(trunk=trunk)
-    resp = router._fetch_response(params=m.FilterParams(), trunk_method=trunk.volumes)
+    app = CVApp(trunk=trunk)
+    resp = app._fetch_response(params=m.FilterParams(), trunk_method=trunk.volumes)
     assert resp.status_code == expected_status
 
 
@@ -70,13 +70,12 @@ def test_unsupported_response_error_returns_501():
     trunk = mock(ComicTrunk)
     when(trunk).volumes(...).thenRaise(UnsupportedResponseError())
 
-    router = CVRouter(trunk=trunk)
-    resp = router._fetch_response(params=m.FilterParams(), trunk_method=trunk.volumes)
+    app = CVApp(trunk=trunk)
+    resp = app._fetch_response(params=m.FilterParams(), trunk_method=trunk.volumes)
     assert resp.status_code == 501
-    # body should contain a traceback string
+    # body should contain an error string
     body = _json_from_response(resp)
-    assert isinstance(body, str)
-    assert "Traceback" in body
+    assert "error" in body
 
 
 def minimal_base_volume_dict():
@@ -119,12 +118,10 @@ def client_and_trunk():
     when(trunk).search(...).thenReturn(m.CVResponse(results=[]))
     when(trunk).types(...).thenReturn(m.CVResponse(results=[{"detail_resource_name": "volume"}]))
 
-    router = CVRouter(trunk=trunk)
-    router.api_key = "secret"
+    app = CVApp(trunk=trunk)
+    app.api_key = "secret"
 
-    app = FastAPI()
-    app.include_router(router.router)
-    client = TestClient(app)
+    client = TestClient(app.app)
 
     return client, trunk
 
@@ -137,7 +134,7 @@ def test_undefined_route(client_and_trunk: tuple[TestClient, ComicTrunk]):
 def test_volumes_route_requires_api_key(client_and_trunk: tuple[TestClient, ComicTrunk]):
     client, _ = client_and_trunk
     r = client.get("/volumes")
-    assert r.status_code == CVRouter.INVALID_API_KEY.status_code
+    assert r.status_code == CVApp.INVALID_API_KEY.status_code
 
 
 def test_volumes_route_with_api_key_returns_ok(client_and_trunk: tuple[TestClient, ComicTrunk]):
@@ -215,9 +212,9 @@ def test_search_with_query_calls_trunk_and_returns_ok(client_and_trunk: tuple[Te
 @pytest.mark.asyncio
 async def test_get_search_without_query_returns_object_not_found():
     trunk = mock(ComicTrunk)
-    router = CVRouter(trunk=trunk)
+    app = CVApp(trunk=trunk)
 
-    resp = await router._get_search(params=m.SearchParams())
+    resp = await app._get_search(params=m.SearchParams())
     assert resp.status_code == 200
     content = _json_from_response(resp)
     assert isinstance(content, dict)
