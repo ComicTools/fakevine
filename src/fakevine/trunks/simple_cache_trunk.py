@@ -22,7 +22,7 @@ class SimpleCacheTrunk(ComicTrunk):
     """A SQLite backed cache for requests to ComicVine."""
 
     def __init__(self, cv_api_key: str, cache_expiry_minutes : int = 24*60, cache_filename: str | None = None,
-        cv_api_url: str | None = None) -> None:
+        cv_api_url: str | None = None, user_agent: str = "fauxvigne") -> None:
         """Initialize SimpleCacheTrunk with ComicVine API credentials and cache settings.
 
         Args:
@@ -30,6 +30,7 @@ class SimpleCacheTrunk(ComicTrunk):
             cache_expiry_minutes: Cache expiration time in minutes (default: 24 hours).
             cache_filename: SQLite cache filename (default: 'requests-cache.sqlite').
             cv_api_url: ComicVine API base URL (default: Official CV API URL).
+            user_agent: User-Agent for requests to CV.
 
         """
         self.cv_api_key = cv_api_key
@@ -42,7 +43,7 @@ class SimpleCacheTrunk(ComicTrunk):
         }
 
         self.headers = {
-            'User-Agent' : 'vineyard',
+            'User-Agent' : user_agent,
             'Content-Type' : 'application/json',
         }
 
