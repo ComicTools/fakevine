@@ -35,7 +35,8 @@ def main() -> None:
                 cv_api_key=os.environ["CACHE_CV_API_KEY"],
                 cache_filename=os.environ.get("CACHE_DB_PATH"),
                 cache_expiry_minutes=cache_expiry,
-                cv_api_url=os.environ.get("CACHE_CV_API_URL")),
+                cv_api_url=os.environ.get("CACHE_CV_API_URL"),
+                user_agent=os.environ.get("CACHE_CV_UA", "fauxvigne")),
                 api_key=os.environ.get("API_KEY"))
 
         case "staticdb":
