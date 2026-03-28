@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from pydantic.fields import FieldInfo
-from sqlalchemy import ColumnElement, Engine, Result, Row, Select, Sequence, create_engine, func, select
+from sqlalchemy import ColumnElement, Engine, Result, Row, Select, Sequence, asc, create_engine, func, select
 from sqlalchemy.exc import DatabaseError
 from sqlalchemy.orm import Query, Session
 from sqlalchemy.sql.base import ReadOnlyColumnCollection
@@ -51,6 +51,8 @@ class StaticDBTrunk(ComicTrunk):
             logging.getLogger("sqlalchemy.engine").setLevel(logging.INFO)
 
         # TODO@falo2k: Validate database schema
+
+        self._base_entity_fields = ['id', 'api_detail_url', 'name', 'aliases', 'deck', 'description', 'image', 'site_detail_url']
 
     def _datetime_format(self, date_time: datetime.datetime) -> str:
         return date_time.strftime('%Y-%m-%d %H:%M:%S')
@@ -98,6 +100,112 @@ class StaticDBTrunk(ComicTrunk):
 
         return query
 
+    def _get_character_data(self, db_record: db.Character, field_list: list[str]) -> dict:
+        response_dict = {}
+
+        direct_copy_fields = [*self._base_entity_fields, 'gender', 'real_name']
+
+        for copy_field in direct_copy_fields:
+            response_dict[copy_field] = getattr(db_record, copy_field)
+
+        response_dict['date_added'] = self._datetime_format(db_record.date_added)
+        response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
+        response_dict['birth'] = self._datetime_format(db_record.birth) if db_record.birth is not None else None
+        response_dict['origin'] = db_record.origin.summary if db_record.origin is not None else None
+        response_dict['publisher'] = db_record.publisher.summary if db_record.publisher is not None else None
+
+        if 'first_appeared_in_issue' in field_list:
+            query = self.session.execute(
+                select(db.Issue.id, db.Issue.issue_number, db.Issue.name, db.Issue.api_detail_url) \
+                    .select_from(db.IssueCharacter).where(db.IssueCharacter.character_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueCharacter.issue_id) \
+                    .where(db.Issue.cover_date.is_not(None)) \
+                    .order_by(asc(db.Issue.cover_date))).first()
+            response_dict['first_appeared_in_issue'] = None if query is None else query._asdict()
+
+        if 'issue_credits' in field_list or 'count_of_appearances' in field_list:
+            query: list = self.session.execute(
+                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
+                    .select_from(db.IssueCharacter).where(db.IssueCharacter.character_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueCharacter.issue_id)).all()
+            response_dict['count_of_issue_apperances'] = len(query)
+            response_dict['issue_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'issues_died_in' in field_list:
+            query: list = self.session.execute(
+                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
+                    .select_from(db.CharacterIssueDied).where(db.CharacterIssueDied.character_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.CharacterIssueDied.issue_id)).all()
+            response_dict['issues_died_in'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'powers' in field_list:
+            query: list = self.session.execute(
+                select(db.Power.id, db.Power.name, db.Power.api_detail_url) \
+                    .select_from(db.CharacterPower).where(db.CharacterPower.character_id == db_record.id) \
+                    .join(db.Power, db.Power.id == db.CharacterPower.power_id)).all()
+            response_dict['powers'] = self._rows_to_list(query, api.BasicLinkedEntity)
+
+        if 'character_enemies' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
+                    .select_from(db.CharacterEnemy).where(db.CharacterEnemy.character_id == db_record.id) \
+                    .join(db.Character, db.Character.id == db.CharacterEnemy.enemy_id)).all()
+            response_dict['character_enemies'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'character_friends' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
+                    .select_from(db.CharacterFriend).where(db.CharacterFriend.character_id == db_record.id) \
+                    .join(db.Character, db.Character.id == db.CharacterFriend.friend_id)).all()
+            response_dict['character_friends'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'creators' in field_list:
+            query: list = self.session.execute(
+                select(db.Person.id, db.Person.name, db.Person.api_detail_url, db.Person.site_detail_url) \
+                    .select_from(db.CharacterCreator).where(db.CharacterCreator.character_id == db_record.id) \
+                    .join(db.Person, db.Person.id == db.CharacterCreator.person_id)).all()
+            response_dict['creators'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'story_arc_credits' in field_list:
+            subq = select(db.StoryArcIssue.story_arc_id).distinct() \
+                    .select_from(db.IssueCharacter).where(db.IssueCharacter.character_id == db_record.id) \
+                    .join(db.StoryArcIssue, db.StoryArcIssue.issue_id == db.IssueCharacter.issue_id).subquery()
+            query: list = self.session.execute(
+                select(db.StoryArc.id, db.StoryArc.name, db.StoryArc.api_detail_url, db.StoryArc.site_detail_url) \
+                    .join(subq, db.StoryArc.id == subq.c.story_arc_id)).all()
+            response_dict['story_arc_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'volume_credits' in field_list:
+            query: list = self.session.execute(
+                select(db.Volume.id, db.Volume.name, db.Volume.api_detail_url, db.Volume.site_detail_url) \
+                    .select_from(db.IssueCharacter).where(db.IssueCharacter.character_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueCharacter.issue_id) \
+                    .join(db.Volume, db.Issue.volume_id == db.Volume.id)).all()
+            response_dict['volume_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'team_enemies' in field_list:
+            query: list = self.session.execute(
+                select(db.Team.id, db.Team.name, db.Team.api_detail_url, db.Team.site_detail_url) \
+                    .select_from(db.TeamCharacterEnemy).where(db.TeamCharacterEnemy.character_id == db_record.id) \
+                    .join(db.Team, db.Team.id == db.TeamCharacterEnemy.team_id)).all()
+            response_dict['team_enemies'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'team_friends' in field_list:
+            query: list = self.session.execute(
+                select(db.Team.id, db.Team.name, db.Team.api_detail_url, db.Team.site_detail_url) \
+                    .select_from(db.TeamCharacterFriend).where(db.TeamCharacterFriend.character_id == db_record.id) \
+                    .join(db.Team, db.Team.id == db.TeamCharacterFriend.team_id)).all()
+            response_dict['team_friends'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'teams' in field_list:
+            query: list = self.session.execute(
+                select(db.Team.id, db.Team.name, db.Team.api_detail_url, db.Team.site_detail_url) \
+                    .select_from(db.TeamCharacterMember).where(db.TeamCharacterMember.character_id == db_record.id) \
+                    .join(db.Team, db.Team.id == db.TeamCharacterMember.team_id)).all()
+            response_dict['teams'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        return {k:v for k,v in response_dict.items() if k in field_list}
+
     def character(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailCharacter]:
         character_query: Result[db.Character] = self.session.execute(select(db.Character).where(db.Character.id == int(item_id)))
         character_row: Row = character_query.first()
@@ -112,104 +220,10 @@ class StaticDBTrunk(ComicTrunk):
             field_list = params.field_list.split(',')
             return_class = api.filtered_model(api.DetailCharacter, field_list)
 
-        direct_copy_fields = ['id', 'api_detail_url', 'name', 'aliases', 'deck', 'description', 'image',
-                'gender', 'real_name', 'site_detail_url']
+        item_record: db.Character = character_row[0]
 
-        character_record: db.Character = character_row[0]
+        response_dict =  self._get_character_data(item_record, field_list)
 
-        response_dict = {}
-
-        for copy_field in direct_copy_fields:
-            response_dict[copy_field] = getattr(character_record, copy_field)
-
-        response_dict['date_added'] = self._datetime_format(character_record.date_added)
-        response_dict['date_last_updated'] = self._datetime_format(character_record.date_last_updated)
-        response_dict['birth'] = self._datetime_format(character_record.birth) if character_record.birth is not None else None
-        response_dict['origin'] = character_record.origin.summary if character_record.origin is not None else None
-        response_dict['publisher'] = character_record.publisher.summary if character_record.publisher is not None else None
-
-        if 'issue_credits' in field_list or 'count_of_appearances' in field_list:
-            query: list = self.session.execute(
-                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
-                    .select_from(db.IssueCharacter).where(db.IssueCharacter.character_id == item_id) \
-                    .join(db.Issue, db.Issue.id == db.IssueCharacter.issue_id)).all()
-            response_dict['count_of_issue_apperances'] = len(query)
-            response_dict['issue_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
-
-        if 'issues_died_in' in field_list:
-            query: list = self.session.execute(
-                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
-                    .select_from(db.CharacterIssueDied).where(db.CharacterIssueDied.character_id == item_id) \
-                    .join(db.Issue, db.Issue.id == db.CharacterIssueDied.issue_id)).all()
-            response_dict['issues_died_in'] = self._rows_to_list(query, api.SiteLinkedEntity)
-
-        if 'powers' in field_list:
-            query: list = self.session.execute(
-                select(db.Power.id, db.Power.name, db.Power.api_detail_url) \
-                    .select_from(db.CharacterPower).where(db.CharacterPower.character_id == item_id) \
-                    .join(db.Power, db.Power.id == db.CharacterPower.power_id)).all()
-            response_dict['powers'] = self._rows_to_list(query, api.BasicLinkedEntity)
-
-        if 'character_enemies' in field_list:
-            query: list = self.session.execute(
-                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
-                    .select_from(db.CharacterEnemy).where(db.CharacterEnemy.character_id == item_id) \
-                    .join(db.Character, db.Character.id == db.CharacterEnemy.enemy_id)).all()
-            response_dict['character_enemies'] = self._rows_to_list(query, api.SiteLinkedEntity)
-
-        if 'character_friends' in field_list:
-            query: list = self.session.execute(
-                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
-                    .select_from(db.CharacterFriend).where(db.CharacterFriend.character_id == item_id) \
-                    .join(db.Character, db.Character.id == db.CharacterFriend.friend_id)).all()
-            response_dict['character_friends'] = self._rows_to_list(query, api.SiteLinkedEntity)
-
-        if 'creators' in field_list:
-            query: list = self.session.execute(
-                select(db.Person.id, db.Person.name, db.Person.api_detail_url, db.Person.site_detail_url) \
-                    .select_from(db.CharacterCreator).where(db.CharacterCreator.character_id == item_id) \
-                    .join(db.Person, db.Person.id == db.CharacterCreator.person_id)).all()
-            response_dict['creators'] = self._rows_to_list(query, api.SiteLinkedEntity)
-
-        if 'story_arc_credits' in field_list:
-            subq = select(db.StoryArcIssue.story_arc_id).distinct() \
-                    .select_from(db.IssueCharacter).where(db.IssueCharacter.character_id == item_id) \
-                    .join(db.StoryArcIssue, db.StoryArcIssue.issue_id == db.IssueCharacter.issue_id).subquery()
-            query: list = self.session.execute(
-                select(db.StoryArc.id, db.StoryArc.name, db.StoryArc.api_detail_url, db.StoryArc.site_detail_url) \
-                    .join(subq, db.StoryArc.id == subq.c.story_arc_id)).all()
-            response_dict['story_arc_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
-
-        if 'volume_credits' in field_list:
-            query: list = self.session.execute(
-                select(db.Volume.id, db.Volume.name, db.Volume.api_detail_url, db.Volume.site_detail_url) \
-                    .select_from(db.IssueCharacter).where(db.IssueCharacter.character_id == item_id) \
-                    .join(db.Issue, db.Issue.id == db.IssueCharacter.issue_id) \
-                    .join(db.Volume, db.Issue.volume_id == db.Volume.id)).all()
-            response_dict['volume_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
-
-        if 'team_enemies' in field_list:
-            query: list = self.session.execute(
-                select(db.Team.id, db.Team.name, db.Team.api_detail_url, db.Team.site_detail_url) \
-                    .select_from(db.TeamCharacterEnemy).where(db.TeamCharacterEnemy.character_id == item_id) \
-                    .join(db.Team, db.Team.id == db.TeamCharacterEnemy.team_id)).all()
-            response_dict['team_enemies'] = self._rows_to_list(query, api.SiteLinkedEntity)
-
-        if 'team_friends' in field_list:
-            query: list = self.session.execute(
-                select(db.Team.id, db.Team.name, db.Team.api_detail_url, db.Team.site_detail_url) \
-                    .select_from(db.TeamCharacterFriend).where(db.TeamCharacterFriend.character_id == item_id) \
-                    .join(db.Team, db.Team.id == db.TeamCharacterFriend.team_id)).all()
-            response_dict['team_friends'] = self._rows_to_list(query, api.SiteLinkedEntity)
-
-        if 'teams' in field_list:
-            query: list = self.session.execute(
-                select(db.Team.id, db.Team.name, db.Team.api_detail_url, db.Team.site_detail_url) \
-                    .select_from(db.TeamCharacterMember).where(db.TeamCharacterMember.character_id == item_id) \
-                    .join(db.Team, db.Team.id == db.TeamCharacterMember.team_id)).all()
-            response_dict['teams'] = self._rows_to_list(query, api.SiteLinkedEntity)
-
-        response_dict = {k:v for k,v in response_dict.items() if k in field_list}
         response_object = return_class(**response_dict)
 
         return api.SingleResponse[return_class](  # ty:ignore[invalid-type-form]
@@ -230,7 +244,7 @@ class StaticDBTrunk(ComicTrunk):
             .order_by(text(sort_string)).offset(params.offset).limit(params.limit)
 
         if params.field_list is None or params.field_list == []:
-            field_list = api.DetailCharacter.model_fields.keys()
+            field_list = api.BaseCharacter.model_fields.keys()
             return_class = api.BaseCharacter
         else:
             field_list = params.field_list.split(',')
@@ -244,31 +258,12 @@ class StaticDBTrunk(ComicTrunk):
         if character_rows is None:
             return api.MultiResponse[api.BaseCharacter](limit=0, status_code=101)
 
-        direct_copy_fields = ['id', 'api_detail_url', 'name', 'aliases', 'deck', 'description', 'image',
-                'gender', 'real_name', 'site_detail_url']
-
         response_objects = []
 
         for character_row in character_rows:
-            character_record: db.Character = character_row[0]
+            item_record: db.Character = character_row[0]
 
-            response_dict = {}
-
-            for copy_field in direct_copy_fields:
-                response_dict[copy_field] = getattr(character_record, copy_field)
-
-            response_dict['date_added'] = self._datetime_format(character_record.date_added)
-            response_dict['date_last_updated'] = self._datetime_format(character_record.date_last_updated)
-            response_dict['birth'] = self._datetime_format(character_record.birth) if character_record.birth is not None else None
-            response_dict['origin'] = character_record.origin.summary if character_record.origin is not None else None
-            response_dict['publisher'] = character_record.publisher.summary if character_record.publisher is not None else None
-
-            if 'count_of_issue_apperances' in field_list:
-                issue_count = self.session.execute(
-                    select(func.count(db.IssueCharacter.issue_id)).where(db.IssueCharacter.character_id == character_record.id)).scalar()
-                response_dict['count_of_issue_apperances'] = issue_count
-
-            response_dict = {k:v for k,v in response_dict.items() if k in field_list}
+            response_dict =  self._get_character_data(item_record, field_list)
             response_object = return_class(**response_dict)
 
             response_objects.append(response_object)
@@ -281,11 +276,123 @@ class StaticDBTrunk(ComicTrunk):
             status_code=1,
             results=response_objects)
 
+    def _get_concept_data(self, db_record: db.Concept, field_list: list[str]) -> dict:
+        direct_copy_fields = [*self._base_entity_fields]
+
+        response_dict = {}
+
+        for copy_field in direct_copy_fields:
+            response_dict[copy_field] = getattr(db_record, copy_field)
+
+        response_dict['date_added'] = self._datetime_format(db_record.date_added)
+        response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
+
+        if 'first_appeared_in_issue' in field_list or 'start_year' in field_list:
+            query: Row = self.session.execute(
+                select(db.Issue.id, db.Issue.issue_number, db.Issue.name, db.Issue.api_detail_url, db.Issue.cover_date) \
+                    .select_from(db.IssueConcept).where(db.IssueConcept.concept_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueConcept.issue_id) \
+                    .where(db.Issue.cover_date.is_not(None)) \
+                    .order_by(asc(db.Issue.cover_date))).first()
+
+            if query is not None:
+                response_dict['first_appeared_in_issue'] = {
+                    'id': query.id,
+                    'issue_number': query.issue_number,
+                    'name': query.name,
+                    'api_detail_url': query.api_detail_url,
+                }
+                response_dict['start_year'] = str(query.cover_date.year)
+
+        if 'issue_credits' in field_list or 'count_of_appearances' in field_list:
+            query: list = self.session.execute(
+                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
+                    .select_from(db.IssueConcept).where(db.IssueConcept.concept_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueConcept.issue_id)).all()
+            response_dict['count_of_issue_apperances'] = len(query)
+            response_dict['issue_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'volume_credits' in field_list:
+            query: list = self.session.execute(
+                select(db.Volume.id, db.Volume.name, db.Volume.api_detail_url, db.Volume.site_detail_url) \
+                    .select_from(db.IssueConcept).where(db.IssueConcept.concept_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueConcept.issue_id) \
+                    .join(db.Volume, db.Issue.volume_id == db.Volume.id)).all()
+            response_dict['volume_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        return {k:v for k,v in response_dict.items() if k in field_list}
+
+
+
     def concept(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailConcept]:
-        raise NotImplementedError("Route not implemented by trunk")
+        item_query: Result[db.Concept] = self.session.execute(select(db.Concept).where(db.Concept.id == int(item_id)))
+        item_row: Row = item_query.first()
+
+        if item_row is None:
+            return api.SingleResponse[api.DetailConcept](limit=0, status_code=101)
+
+        if params.field_list is None or params.field_list == "":
+            field_list = api.DetailConcept.model_fields.keys()
+            return_class = api.DetailConcept
+        else:
+            field_list = params.field_list.split(',')
+            return_class = api.filtered_model(api.DetailConcept, field_list)
+
+        item_record: db.Concept = item_row[0]
+
+        response_dict = self._get_concept_data(item_record, field_list)
+
+        response_object = return_class(**response_dict)
+
+        return api.SingleResponse[return_class](  # ty:ignore[invalid-type-form]
+            limit=1,
+            number_of_page_results=1,
+            number_of_total_results=1,
+            status_code=1,
+            results=response_object)
 
     def concepts(self, params: api.FilterParams) -> api.MultiResponse[api.BaseConcept]:
-        raise NotImplementedError("Route not implemented by trunk")
+        sort_params = ('id', 'asc') if params.sort is None or params.sort == "" else tuple(params.sort.split(':'))
+        sort_string = f'{sort_params[0]} {sort_params[1].upper()}'
+
+        filter_list = [] if params.filter is None else params.filter.split(',')
+
+        item_count_query: Query = func.count(db.Concept.id)
+        item_query: Query = select(db.Concept) \
+            .order_by(text(sort_string)).offset(params.offset).limit(params.limit)
+
+        if params.field_list is None or params.field_list == []:
+            field_list = api.BaseConcept.model_fields.keys()
+            return_class = api.BaseConcept
+        else:
+            field_list = params.field_list.split(',')
+            return_class = api.filtered_model(api.BaseConcept, field_list)
+
+        item_query = self._build_filtered_query(item_query, filter_list, return_class.model_fields)
+
+        record_count: int = self.session.execute(item_count_query).scalar()
+        item_rows: Sequence[Row] = self.session.execute(item_query).all()
+
+        if item_rows is None:
+            return api.MultiResponse[api.BaseConcept](limit=0, status_code=101)
+
+        response_objects = []
+
+        for item_row in item_rows:
+            item_record: db.Concept = item_row[0]
+
+            response_dict =  self._get_concept_data(item_record, field_list)
+            response_object = return_class(**response_dict)
+
+            response_objects.append(response_object)
+
+        return api.MultiResponse[return_class](  # ty:ignore[invalid-type-form]
+            limit=params.limit,
+            offset=params.offset,
+            number_of_page_results=len(item_rows),
+            number_of_total_results=record_count,
+            status_code=1,
+            results=response_objects)
 
     def issue(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailIssue]:
         raise NotImplementedError("Route not implemented by trunk")
