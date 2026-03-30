@@ -1,15 +1,12 @@
 # ruff: noqa: EM101, D102
 import logging
 import os
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from pydantic.fields import FieldInfo
-from sqlalchemy import ColumnElement, Engine, Result, Row, Select, Sequence, asc, create_engine, func, select
+from sqlalchemy import Engine, Result, Row, Select, Sequence, String, asc, cast, create_engine, func, select
 from sqlalchemy.exc import DatabaseError
 from sqlalchemy.orm import Query, Session
-from sqlalchemy.sql.base import ReadOnlyColumnCollection
-from sqlalchemy.sql.elements import KeyedColumnElement
 from sqlalchemy.sql.expression import text
 
 from fakevine.models import cvapimodels as api
@@ -18,7 +15,12 @@ from fakevine.trunks.comic_trunk import ComicTrunk
 
 if TYPE_CHECKING:
     import datetime
+    from collections.abc import Callable
     from pathlib import Path
+
+    from pydantic.fields import FieldInfo
+    from sqlalchemy.sql.base import ReadOnlyColumnCollection
+    from sqlalchemy.sql.elements import KeyedColumnElement
 
 
 class StaticDBTrunk(ComicTrunk):
@@ -57,8 +59,14 @@ class StaticDBTrunk(ComicTrunk):
     def _datetime_format(self, date_time: datetime.datetime) -> str:
         return date_time.strftime('%Y-%m-%d %H:%M:%S')
 
-    def _rows_to_list(self, rows: Sequence[Row], container_class: type[api.BasicLinkedEntity]) -> list:
-        def inner_func(row: Row) -> api.BasicLinkedEntity:
+    def _date_format(self, date: datetime.date) -> str:
+        return date.strftime('%Y-%m-%d')
+
+    def _birth_date_format(self, date: datetime.date) -> str:
+        return date.strftime('%b %d, %Y')
+
+    def _rows_to_list(self, rows: Sequence[Row], container_class: type[api.BaseModel]) -> list:
+        def inner_func(row: Row) -> api.BaseModel:
             return container_class(**row._asdict())
 
         return list(map(inner_func, rows))
@@ -101,7 +109,7 @@ class StaticDBTrunk(ComicTrunk):
         return query
 
     def _generate_single_response(self, item_id: int, params: api.CommonParams, db_table: type[db.BaseTable],
-                                    api_model: type[api.BaseEntity], mapping_function: Callable) -> api.SingleResponse[api.BaseModelExtra]:
+                            api_model: type[api.BaseModelExtra], mapping_function: Callable) -> api.SingleResponse[api.BaseModelExtra]:
         item_query: Result[db.Character] = self.session.execute(select(db_table).where(db_table.id == int(item_id)))
         item_row: Row = item_query.first()
 
@@ -128,8 +136,8 @@ class StaticDBTrunk(ComicTrunk):
             status_code=1,
             results=response_object)
 
-    def _generate_multi_response(self, params: api.FilterParams, db_table: type[db.BaseTable],
-                                    api_model: type[api.BaseEntity], mapping_function: Callable) -> api.MultiResponse[api.BaseModelExtra]:
+    def _generate_multi_response(self, params: api.FilterParams, db_table: type[db.BaseTable], api_model: type[api.BaseModelExtra],
+                                        mapping_function: Callable) -> api.MultiResponse[api.BaseModelExtra]:
         sort_params = ('id', 'asc') if params.sort is None or params.sort == "" else tuple(params.sort.split(':'))
         sort_string = f'{sort_params[0]} {sort_params[1].upper()}'
 
@@ -172,7 +180,7 @@ class StaticDBTrunk(ComicTrunk):
             status_code=1,
             results=response_objects)
 
-    def _get_character_data(self, db_record: db.Character, field_list: list[str]) -> dict:
+    def _get_character_data(self, db_record: db.Character, field_list: list[str]) -> dict:  # noqa: C901, PLR0912
         response_dict = {}
 
         direct_copy_fields = [*self._base_entity_fields, 'gender', 'real_name']
@@ -182,7 +190,7 @@ class StaticDBTrunk(ComicTrunk):
 
         response_dict['date_added'] = self._datetime_format(db_record.date_added)
         response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
-        response_dict['birth'] = self._datetime_format(db_record.birth) if db_record.birth is not None else None
+        response_dict['birth'] = self._birth_date_format(db_record.birth) if db_record.birth is not None else None
         response_dict['origin'] = db_record.origin.summary if db_record.origin is not None else None
         response_dict['publisher'] = db_record.publisher.summary if db_record.publisher is not None else None
 
@@ -195,12 +203,12 @@ class StaticDBTrunk(ComicTrunk):
                     .order_by(asc(db.Issue.cover_date))).first()
             response_dict['first_appeared_in_issue'] = None if query is None else query._asdict()
 
-        if 'issue_credits' in field_list or 'count_of_appearances' in field_list:
+        if 'issue_credits' in field_list or 'count_of_issue_appearances' in field_list:
             query: list = self.session.execute(
                 select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
                     .select_from(db.IssueCharacter).where(db.IssueCharacter.character_id == db_record.id) \
                     .join(db.Issue, db.Issue.id == db.IssueCharacter.issue_id)).all()
-            response_dict['count_of_issue_apperances'] = len(query)
+            response_dict['count_of_issue_appearances'] = len(query)
             response_dict['issue_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
 
         if 'issues_died_in' in field_list:
@@ -248,11 +256,12 @@ class StaticDBTrunk(ComicTrunk):
             response_dict['story_arc_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
 
         if 'volume_credits' in field_list:
+            subq = select(db.Issue.volume_id).distinct() \
+                    .select_from(db.IssueCharacter).where(db.IssueCharacter.character_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueCharacter.issue_id).subquery()
             query: list = self.session.execute(
                 select(db.Volume.id, db.Volume.name, db.Volume.api_detail_url, db.Volume.site_detail_url) \
-                    .select_from(db.IssueCharacter).where(db.IssueCharacter.character_id == db_record.id) \
-                    .join(db.Issue, db.Issue.id == db.IssueCharacter.issue_id) \
-                    .join(db.Volume, db.Issue.volume_id == db.Volume.id)).all()
+                    .join(subq, db.Volume.id == subq.c.volume_id)).all()
             response_dict['volume_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
 
         if 'team_enemies' in field_list:
@@ -314,20 +323,21 @@ class StaticDBTrunk(ComicTrunk):
                 }
                 response_dict['start_year'] = str(query.cover_date.year)
 
-        if 'issue_credits' in field_list or 'count_of_appearances' in field_list:
+        if 'issue_credits' in field_list or 'count_of_isssue_appearances' in field_list:
             query: list = self.session.execute(
                 select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
                     .select_from(db.IssueConcept).where(db.IssueConcept.concept_id == db_record.id) \
                     .join(db.Issue, db.Issue.id == db.IssueConcept.issue_id)).all()
-            response_dict['count_of_issue_apperances'] = len(query)
+            response_dict['count_of_isssue_appearances'] = len(query)
             response_dict['issue_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
 
         if 'volume_credits' in field_list:
+            subq = select(db.Issue.volume_id).distinct() \
+                    .select_from(db.IssueConcept).where(db.IssueConcept.concept_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueConcept.issue_id).subquery()
             query: list = self.session.execute(
                 select(db.Volume.id, db.Volume.name, db.Volume.api_detail_url, db.Volume.site_detail_url) \
-                    .select_from(db.IssueConcept).where(db.IssueConcept.concept_id == db_record.id) \
-                    .join(db.Issue, db.Issue.id == db.IssueConcept.issue_id) \
-                    .join(db.Volume, db.Issue.volume_id == db.Volume.id)).all()
+                    .join(subq, db.Volume.id == subq.c.volume_id)).all()
             response_dict['volume_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
 
         return {k:v for k,v in response_dict.items() if k in field_list}
@@ -340,8 +350,109 @@ class StaticDBTrunk(ComicTrunk):
         return self._generate_multi_response(params, db.Concept, api.BaseConcept,
                 self._get_concept_data)  # ty:ignore[invalid-return-type]
 
-    def _get_issue_data(self, db_record: db.Issue, field_list: list[str]) -> dict:
-        direct_copy_fields = [*self._base_entity_fields, 'associated_images', 'issue_number', 'cover_date', 'store_date']
+    def _get_issue_data(self, db_record: db.Issue, field_list: list[str]) -> dict:  # noqa: C901
+        direct_copy_fields = [*self._base_entity_fields, 'issue_number']
+
+        response_dict = {}
+
+        for copy_field in direct_copy_fields:
+            response_dict[copy_field] = getattr(db_record, copy_field)
+
+        response_dict['date_added'] = self._datetime_format(db_record.date_added)
+        response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
+        response_dict['cover_date'] = None if db_record.cover_date is None else self._date_format(db_record.cover_date)
+        response_dict['store_date'] = None if db_record.cover_date is None else self._date_format(db_record.cover_date)
+
+        if 'associated_images' in field_list:
+            query: list = self.session.execute(
+                select(db.IssueAssociatedImage.id, db.IssueAssociatedImage.caption,
+                       db.IssueAssociatedImage.original_url, db.IssueAssociatedImage.image_tags) \
+                    .where(db.IssueAssociatedImage.issue_id == db_record.id)).all()
+
+            response_dict['associated_images'] = self._rows_to_list(query, api.AssociatedImages)
+
+        if 'volume' in field_list and db_record.volume_id is not None:
+            query: Row = self.session.execute(
+                select(db.Volume.id, db.Volume.api_detail_url, db.Volume.name, db.Volume.site_detail_url) \
+                    .where(db.Volume.id == db_record.volume_id)).first()
+
+            response_dict['volume'] = query._asdict()
+
+        if 'character_credits' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
+                    .select_from(db.IssueCharacter).where(db.IssueCharacter.issue_id == db_record.id) \
+                    .join(db.Character, db.Character.id == db.IssueCharacter.character_id)).all()
+            response_dict['character_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'character_died_in' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
+                    .select_from(db.CharacterIssueDied).where(db.CharacterIssueDied.issue_id == db_record.id) \
+                    .join(db.Character, db.Character.id == db.CharacterIssueDied.character_id)).all()
+            response_dict['character_died_in'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'concept_credits' in field_list:
+            query: list = self.session.execute(
+                select(db.Concept.id, db.Concept.name, db.Concept.api_detail_url, db.Concept.site_detail_url) \
+                    .select_from(db.IssueConcept).where(db.IssueConcept.issue_id == db_record.id) \
+                    .join(db.Concept, db.Concept.id == db.IssueConcept.concept_id)).all()
+            response_dict['concept_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'location_credits' in field_list:
+            query: list = self.session.execute(
+                select(db.Location.id, db.Location.name, db.Location.api_detail_url, db.Location.site_detail_url) \
+                    .select_from(db.IssueLocation).where(db.IssueLocation.issue_id == db_record.id) \
+                    .join(db.Location, db.Location.id == db.IssueLocation.location_id)).all()
+            response_dict['location_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'object_credits' in field_list:
+            query: list = self.session.execute(
+                select(db.Object.id, db.Object.name, db.Object.api_detail_url, db.Object.site_detail_url) \
+                    .select_from(db.IssueObject).where(db.IssueObject.issue_id == db_record.id) \
+                    .join(db.Object, db.Object.id == db.IssueObject.object_id)).all()
+            response_dict['object_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'person_credits' in field_list:
+            query: list = self.session.execute(
+                select(db.Person.id, db.Person.name, db.Person.api_detail_url, db.Person.site_detail_url, db.IssueCredit.role) \
+                    .select_from(db.IssueCredit).where(db.IssueCredit.issue_id == db_record.id) \
+                    .join(db.Person, db.Person.id == db.IssueCredit.person_id)).all()
+            response_dict['person_credits'] = self._rows_to_list(query, api.PersonCredits)
+
+        if 'story_arc_credits' in field_list:
+            query: list = self.session.execute(
+                select(db.StoryArc.id, db.StoryArc.name, db.StoryArc.api_detail_url, db.StoryArc.site_detail_url) \
+                    .select_from(db.StoryArcIssue).where(db.StoryArcIssue.issue_id == db_record.id) \
+                    .join(db.StoryArc, db.StoryArc.id == db.StoryArcIssue.story_arc_id)).all()
+            response_dict['story_arc_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'team_credits' in field_list:
+            query: list = self.session.execute(
+                select(db.Team.id, db.Team.name, db.Team.api_detail_url, db.Team.site_detail_url) \
+                    .select_from(db.IssueTeam).where(db.IssueTeam.issue_id == db_record.id) \
+                    .join(db.Team, db.Team.id == db.IssueTeam.team_id)).all()
+            response_dict['team_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'team_disbanded_in' in field_list:
+            query: list = self.session.execute(
+                select(db.Team.id, db.Team.name, db.Team.api_detail_url, db.Team.site_detail_url) \
+                    .select_from(db.TeamIssueDisbanded).where(db.TeamIssueDisbanded.issue_id == db_record.id) \
+                    .join(db.Team, db.Team.id == db.TeamIssueDisbanded.team_id)).all()
+            response_dict['team_disbanded_in'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        return {k:v for k,v in response_dict.items() if k in field_list}
+
+    def issue(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailIssue]:
+        return self._generate_single_response(int(item_id), params, db.Issue, api.DetailIssue,
+                self._get_issue_data)  # ty:ignore[invalid-return-type]
+
+    def issues(self, params: api.FilterParams) -> api.MultiResponse[api.BaseIssue]:
+        return self._generate_multi_response(params, db.Issue, api.BaseIssue,
+                self._get_issue_data)  # ty:ignore[invalid-return-type]
+
+    def _get_location_data(self, db_record: db.Location, field_list: list[str]) -> dict:
+        direct_copy_fields = [*self._base_entity_fields]
 
         response_dict = {}
 
@@ -351,93 +462,502 @@ class StaticDBTrunk(ComicTrunk):
         response_dict['date_added'] = self._datetime_format(db_record.date_added)
         response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
 
-        if 'volume' in field_list and db_record.volume_id is not None:
+        if 'first_appeared_in_issue' in field_list or 'start_year' in field_list:
             query: Row = self.session.execute(
-                select(db.Volume.id, db.Volume.api_detail_url, db.Volume.name, db.Volume.site_detail_url) \
-                    .where(db.Volume.id == db_record.volume_id)).first()
+                select(db.Issue.id, db.Issue.issue_number, db.Issue.name, db.Issue.api_detail_url, db.Issue.cover_date) \
+                    .select_from(db.IssueLocation).where(db.IssueLocation.location_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueLocation.issue_id) \
+                    .where(db.Issue.cover_date.is_not(None)) \
+                    .order_by(asc(db.Issue.cover_date))).first()
 
-            response_dict['volume'] = query._asdict()
+            if query is not None:
+                response_dict['first_appeared_in_issue'] = {
+                    'id': query.id,
+                    'issue_number': query.issue_number,
+                    'name': query.name,
+                    'api_detail_url': query.api_detail_url,
+                }
+                response_dict['start_year'] = str(query.cover_date.year)
 
-        # if 'issue_credits' in field_list or 'count_of_appearances' in field_list:
-        #     query: list = self.session.execute(
-        #         select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
-        #             .select_from(db.IssueConcept).where(db.IssueConcept.concept_id == db_record.id) \
-        #             .join(db.Issue, db.Issue.id == db.IssueConcept.issue_id)).all()
-        #     response_dict['count_of_issue_apperances'] = len(query)
-        #     response_dict['issue_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+        if 'issue_credits' in field_list or 'count_of_issue_appearances' in field_list:
+            query: list = self.session.execute(
+                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
+                    .select_from(db.IssueLocation).where(db.IssueLocation.location_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueLocation.issue_id)).all()
+            response_dict['count_of_issue_appearances'] = len(query)
+            response_dict['issue_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
 
-        # if 'volume_credits' in field_list:
-        #     query: list = self.session.execute(
-        #         select(db.Volume.id, db.Volume.name, db.Volume.api_detail_url, db.Volume.site_detail_url) \
-        #             .select_from(db.IssueConcept).where(db.IssueConcept.concept_id == db_record.id) \
-        #             .join(db.Issue, db.Issue.id == db.IssueConcept.issue_id) \
-        #             .join(db.Volume, db.Issue.volume_id == db.Volume.id)).all()
-        #     response_dict['volume_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+        if 'story_arc_credits' in field_list:
+            subq = select(db.StoryArcIssue.story_arc_id).distinct() \
+                    .select_from(db.IssueLocation).where(db.IssueLocation.location_id == db_record.id) \
+                    .join(db.StoryArcIssue, db.StoryArcIssue.issue_id == db.IssueLocation.issue_id).subquery()
+            query: list = self.session.execute(
+                select(db.StoryArc.id, db.StoryArc.name, db.StoryArc.api_detail_url, db.StoryArc.site_detail_url) \
+                    .join(subq, db.StoryArc.id == subq.c.story_arc_id)).all()
+            response_dict['story_arc_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'volume_credits' in field_list:
+            subq = select(db.Issue.volume_id).distinct() \
+                    .select_from(db.IssueLocation).where(db.IssueLocation.location_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueLocation.issue_id).subquery()
+            query: list = self.session.execute(
+                select(db.Volume.id, db.Volume.name, db.Volume.api_detail_url, db.Volume.site_detail_url) \
+                    .join(subq, db.Volume.id == subq.c.volume_id)).all()
+            response_dict['volume_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
 
         return {k:v for k,v in response_dict.items() if k in field_list}
 
-    def issue(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailIssue]:
-        raise NotImplementedError("Route not implemented by trunk")
-
-    def issues(self, params: api.FilterParams) -> api.MultiResponse[api.BaseIssue]:
-        raise NotImplementedError("Route not implemented by trunk")
-
     def location(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailLocation]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_single_response(int(item_id), params, db.Location, api.DetailLocation,
+                self._get_location_data)  # ty:ignore[invalid-return-type]
 
     def locations(self, params: api.FilterParams) -> api.MultiResponse[api.BaseLocation]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_multi_response(params, db.Location, api.BaseLocation,
+                self._get_location_data)  # ty:ignore[invalid-return-type]
+
+    def _get_object_data(self, db_record: db.Object, field_list: list[str]) -> dict:
+        direct_copy_fields = [*self._base_entity_fields]
+
+        response_dict = {}
+
+        for copy_field in direct_copy_fields:
+            response_dict[copy_field] = getattr(db_record, copy_field)
+
+        response_dict['date_added'] = self._datetime_format(db_record.date_added)
+        response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
+
+        if 'first_appeared_in_issue' in field_list or 'start_year' in field_list:
+            query: Row = self.session.execute(
+                select(db.Issue.id, db.Issue.issue_number, db.Issue.name, db.Issue.api_detail_url, db.Issue.cover_date) \
+                    .select_from(db.IssueObject).where(db.IssueObject.object_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueObject.issue_id) \
+                    .where(db.Issue.cover_date.is_not(None)) \
+                    .order_by(asc(db.Issue.cover_date))).first()
+
+            if query is not None:
+                response_dict['first_appeared_in_issue'] = {
+                    'id': query.id,
+                    'issue_number': query.issue_number,
+                    'name': query.name,
+                    'api_detail_url': query.api_detail_url,
+                }
+                response_dict['start_year'] = str(query.cover_date.year)
+
+        if 'issue_credits' in field_list or 'count_of_issue_appearances' in field_list:
+            query: list = self.session.execute(
+                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
+                    .select_from(db.IssueObject).where(db.IssueObject.object_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueObject.issue_id)).all()
+            response_dict['count_of_issue_appearances'] = len(query)
+            response_dict['issue_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'story_arc_credits' in field_list:
+            subq = select(db.StoryArcIssue.story_arc_id).distinct() \
+                    .select_from(db.IssueObject).where(db.IssueObject.object_id == db_record.id) \
+                    .join(db.StoryArcIssue, db.StoryArcIssue.issue_id == db.IssueObject.issue_id).subquery()
+            query: list = self.session.execute(
+                select(db.StoryArc.id, db.StoryArc.name, db.StoryArc.api_detail_url, db.StoryArc.site_detail_url) \
+                    .join(subq, db.StoryArc.id == subq.c.story_arc_id)).all()
+            response_dict['story_arc_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'volume_credits' in field_list:
+            subq = select(db.Issue.volume_id).distinct() \
+                    .select_from(db.IssueObject).where(db.IssueObject.object_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueObject.issue_id).subquery()
+            query: list = self.session.execute(
+                select(db.Volume.id, db.Volume.name, db.Volume.api_detail_url, db.Volume.site_detail_url) \
+                    .join(subq, db.Volume.id == subq.c.volume_id)).all()
+            response_dict['volume_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        return {k:v for k,v in response_dict.items() if k in field_list}
 
     def object(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailObject]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_single_response(int(item_id), params, db.Object, api.DetailObject,
+                self._get_object_data)  # ty:ignore[invalid-return-type]
 
     def objects(self, params: api.FilterParams) -> api.MultiResponse[api.BaseObject]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_multi_response(params, db.Object, api.BaseObject,
+                self._get_object_data)  # ty:ignore[invalid-return-type]
+
+    def _get_origin_data(self, db_record: db.Origin, field_list: list[str]) -> dict:
+        direct_copy_fields = ['id', 'api_detail_url', 'name', 'site_detail_url']
+
+        response_dict = {}
+
+        for copy_field in direct_copy_fields:
+            response_dict[copy_field] = getattr(db_record, copy_field)
+
+        if 'first_appeared_in_issue' in field_list or 'start_year' in field_list:
+            query: Row = self.session.execute(
+                select(db.Issue.id, db.Issue.issue_number, db.Issue.name, db.Issue.api_detail_url, db.Issue.cover_date) \
+                    .select_from(db.IssueObject).where(db.IssueObject.object_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueObject.issue_id) \
+                    .where(db.Issue.cover_date.is_not(None)) \
+                    .order_by(asc(db.Issue.cover_date))).first()
+
+            if query is not None:
+                response_dict['first_appeared_in_issue'] = {
+                    'id': query.id,
+                    'issue_number': query.issue_number,
+                    'name': query.name,
+                    'api_detail_url': query.api_detail_url,
+                }
+                response_dict['start_year'] = str(query.cover_date.year)
+
+        if 'characters' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
+                    .where(db.Character.origin_id == db_record.id)).all()
+            response_dict['characters'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        return {k:v for k,v in response_dict.items() if k in field_list}
 
     def origin(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailOrigin]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_single_response(int(item_id), params, db.Origin, api.DetailOrigin,
+                self._get_origin_data)  # ty:ignore[invalid-return-type]
 
     def origins(self, params: api.FilterParams) -> api.MultiResponse[api.BaseOrigin]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_multi_response(params, db.Origin, api.BaseOrigin,
+                self._get_origin_data)  # ty:ignore[invalid-return-type]
+
+    def _get_person_data(self, db_record: db.Person, field_list: list[str]) -> dict:
+        direct_copy_fields = [*self._base_entity_fields, 'country', 'email', 'gender', 'hometown', 'website']
+
+        response_dict = {}
+
+        for copy_field in direct_copy_fields:
+            response_dict[copy_field] = getattr(db_record, copy_field)
+
+        response_dict['date_added'] = self._datetime_format(db_record.date_added)
+        response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
+        response_dict['birth'] = None if db_record.birth is None else self._datetime_format(db_record.birth)
+        response_dict['death'] = None if db_record.death is None else db_record.death
+
+        if 'issues' in field_list or 'count_of_isssue_appearances' in field_list:
+            query: list = self.session.execute(
+                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
+                    .select_from(db.IssueCredit).where(db.IssueCredit.person_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueCredit.issue_id)).all()
+            response_dict['count_of_isssue_appearances'] = len(query)
+            response_dict['issues'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'created_characters' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
+                    .select_from(db.CharacterCreator).where(db.CharacterCreator.person_id == db_record.id) \
+                    .join(db.Character, db.Character.id == db.CharacterCreator.character_id)).all()
+            response_dict['created_characters'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'story_arc_credits' in field_list:
+            subq = select(db.StoryArcIssue.story_arc_id).distinct() \
+                    .select_from(db.IssueCredit).where(db.IssueCredit.person_id == db_record.id) \
+                    .join(db.StoryArcIssue, db.StoryArcIssue.issue_id == db.IssueCredit.issue_id).subquery()
+            query: list = self.session.execute(
+                select(db.StoryArc.id, db.StoryArc.name, db.StoryArc.api_detail_url, db.StoryArc.site_detail_url) \
+                    .join(subq, db.StoryArc.id == subq.c.story_arc_id)).all()
+            response_dict['story_arc_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'volume_credits' in field_list:
+            subq = select(db.Issue.volume_id).distinct() \
+                    .select_from(db.IssueCredit).where(db.IssueCredit.person_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueTeam.issue_id).subquery()
+            query: list = self.session.execute(
+                select(db.Volume.id, db.Volume.name, db.Volume.api_detail_url, db.Volume.site_detail_url) \
+                    .join(subq, db.Volume.id == subq.c.volume_id)).all()
+            response_dict['volume_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        return {k:v for k,v in response_dict.items() if k in field_list}
 
     def person(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailPerson]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_single_response(int(item_id), params, db.Person, api.DetailPerson,
+                self._get_person_data)  # ty:ignore[invalid-return-type]
 
     def people(self, params: api.FilterParams) -> api.MultiResponse[api.BasePerson]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_multi_response(params, db.Person, api.BasePerson,
+                self._get_person_data)  # ty:ignore[invalid-return-type]
+
+    def _get_power_data(self, db_record: db.Power, field_list: list[str]) -> dict:
+        direct_copy_fields = [field for field in self._base_entity_fields if field not in ['deck', 'image']]
+
+        response_dict = {}
+
+        for copy_field in direct_copy_fields:
+            response_dict[copy_field] = getattr(db_record, copy_field)
+
+        response_dict['date_added'] = self._datetime_format(db_record.date_added)
+        response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
+
+        if 'characters' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
+                    .select_from(db.CharacterPower).where(db.CharacterPower.power_id == db_record.id) \
+                    .join(db.Character, db.Character.id == db.CharacterPower.character_id)).all()
+            response_dict['characters'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        return {k:v for k,v in response_dict.items() if k in field_list}
 
     def power(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailPower]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_single_response(int(item_id), params, db.Power, api.DetailPower,
+                self._get_power_data)  # ty:ignore[invalid-return-type]
 
     def powers(self, params: api.FilterParams) -> api.MultiResponse[api.BasePower]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_multi_response(params, db.Power, api.BasePower,
+                self._get_power_data)  # ty:ignore[invalid-return-type]
+
+    def _get_publisher_data(self, db_record: db.Publisher, field_list: list[str]) -> dict:
+        direct_copy_fields = [*self._base_entity_fields, 'location_address', 'location_city', 'location_state']
+
+        response_dict = {}
+
+        for copy_field in direct_copy_fields:
+            response_dict[copy_field] = getattr(db_record, copy_field)
+
+        response_dict['date_added'] = self._datetime_format(db_record.date_added)
+        response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
+
+        if 'characters' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
+                    .where(db.Character.publisher_id == db_record.id)).all()
+            response_dict['characters'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'teams' in field_list:
+            query: list = self.session.execute(
+                select(db.Team.id, db.Team.name, db.Team.api_detail_url, db.Team.site_detail_url) \
+                    .where(db.Team.publisher_id == db_record.id)).all()
+            response_dict['teams'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'story_arcs' in field_list:
+            query: list = self.session.execute(
+                select(db.StoryArc.id, db.StoryArc.name, db.StoryArc.api_detail_url, db.StoryArc.site_detail_url) \
+                    .where(db.StoryArc.publisher_id == db_record.id)).all()
+            response_dict['story_arcs'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'volumes' in field_list:
+            query: list = self.session.execute(
+                select(db.Volume.id, db.Volume.name, db.Volume.api_detail_url, db.Volume.site_detail_url) \
+                    .where(db.Volume.publisher_id == db_record.id)).all()
+            response_dict['volumes'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        return {k:v for k,v in response_dict.items() if k in field_list}
 
     def publisher(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailPublisher]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_single_response(int(item_id), params, db.Publisher, api.DetailPublisher,
+                self._get_publisher_data)  # ty:ignore[invalid-return-type]
 
     def publishers(self, params: api.FilterParams) -> api.MultiResponse[api.BasePublisher]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_multi_response(params, db.Publisher, api.BasePublisher,
+                self._get_publisher_data)  # ty:ignore[invalid-return-type]
 
     def search(self, params: api.SearchParams) -> api.SearchResponse:
-        raise NotImplementedError("Route not implemented by trunk")
+        raise NotImplementedError("Route not yet implemented by trunk.  Prioritise the dedicated entity endpoints.")
+
+    def _get_story_arc_data(self, db_record: db.StoryArc, field_list: list[str]) -> dict:
+        direct_copy_fields = [*self._base_entity_fields]
+
+        response_dict = {}
+
+        for copy_field in direct_copy_fields:
+            response_dict[copy_field] = getattr(db_record, copy_field)
+
+        response_dict['date_added'] = self._datetime_format(db_record.date_added)
+        response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
+        response_dict['publisher'] = db_record.publisher.summary if db_record.publisher is not None else None
+
+        if 'first_appeared_in_issue' in field_list:
+            query: Row = self.session.execute(
+                select(db.Issue.id, db.Issue.issue_number, db.Issue.name, db.Issue.api_detail_url, db.Issue.cover_date) \
+                    .select_from(db.StoryArcIssue).where(db.StoryArcIssue.story_arc_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.StoryArcIssue.issue_id) \
+                    .where(db.Issue.cover_date.is_not(None)) \
+                    .order_by(asc(db.Issue.cover_date))).first()
+
+            if query is not None:
+                response_dict['first_appeared_in_issue'] = {
+                    'id': query.id,
+                    'issue_number': query.issue_number,
+                    'name': query.name,
+                    'api_detail_url': query.api_detail_url,
+                }
+
+        if 'issues' in field_list or 'count_of_isssue_appearances' in field_list:
+            query: list = self.session.execute(
+                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
+                    .select_from(db.StoryArcIssue).where(db.StoryArcIssue.story_arc_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.StoryArcIssue.issue_id)).all()
+            response_dict['count_of_isssue_appearances'] = len(query)
+            response_dict['issues'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        return {k:v for k,v in response_dict.items() if k in field_list}
 
     def story_arc(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailStoryArc]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_single_response(int(item_id), params, db.StoryArc, api.DetailStoryArc,
+                self._get_story_arc_data)  # ty:ignore[invalid-return-type]
 
     def story_arcs(self, params: api.FilterParams) -> api.MultiResponse[api.BaseStoryArc]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_multi_response(params, db.StoryArc, api.BaseStoryArc,
+                self._get_story_arc_data)  # ty:ignore[invalid-return-type]
+
+    def _get_team_data(self, db_record: db.Team, field_list: list[str]) -> dict:
+        direct_copy_fields = [*self._base_entity_fields]
+
+        response_dict = {}
+
+        for copy_field in direct_copy_fields:
+            response_dict[copy_field] = getattr(db_record, copy_field)
+
+        response_dict['date_added'] = self._datetime_format(db_record.date_added)
+        response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
+        response_dict['publisher'] = db_record.publisher.summary if db_record.publisher is not None else None
+
+        if 'first_appeared_in_issue' in field_list:
+            query: Row = self.session.execute(
+                select(db.Issue.id, db.Issue.issue_number, db.Issue.name, db.Issue.api_detail_url, db.Issue.cover_date) \
+                    .select_from(db.IssueTeam).where(db.IssueTeam.team_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueTeam.issue_id) \
+                    .where(db.Issue.cover_date.is_not(None)) \
+                    .order_by(asc(db.Issue.cover_date))).first()
+
+            if query is not None:
+                response_dict['first_appeared_in_issue'] = {
+                    'id': query.id,
+                    'issue_number': query.issue_number,
+                    'name': query.name,
+                    'api_detail_url': query.api_detail_url,
+                }
+
+        if 'issue_credits' in field_list or 'count_of_isssue_appearances' in field_list:
+            query: list = self.session.execute(
+                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
+                    .select_from(db.IssueTeam).where(db.IssueTeam.team_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueTeam.issue_id)).all()
+            response_dict['count_of_isssue_appearances'] = len(query)
+            response_dict['issue_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'character_enemies' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
+                    .select_from(db.TeamCharacterEnemy).where(db.TeamCharacterEnemy.team_id == db_record.id) \
+                    .join(db.Character, db.Character.id == db.TeamCharacterEnemy.character_id)).all()
+            response_dict['team_enemies'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'character_friends' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
+                    .select_from(db.TeamCharacterFriend).where(db.TeamCharacterFriend.team_id == db_record.id) \
+                    .join(db.Character, db.Character.id == db.TeamCharacterFriend.character_id)).all()
+            response_dict['team_friends'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'characters' in field_list or 'count_of_team_members' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url) \
+                    .select_from(db.TeamCharacterMember).where(db.TeamCharacterMember.team_id == db_record.id) \
+                    .join(db.Character, db.Character.id == db.TeamCharacterMember.character_id)).all()
+            response_dict['teams'] = self._rows_to_list(query, api.SiteLinkedEntity)
+            response_dict['count_of_team_members'] = len(query)
+
+        if 'disbanded_in_issues' in field_list or 'isssues_disbanded_in' in field_list:
+            query: list = self.session.execute(
+                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url) \
+                    .select_from(db.TeamIssueDisbanded).where(db.TeamIssueDisbanded.team_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.TeamIssueDisbanded.issue_id)).all()
+            data = self._rows_to_list(query, api.SiteLinkedEntity)
+            response_dict['disbanded_in_issues'] = data
+            response_dict['isssues_disbanded_in'] = data
+
+        if 'story_arc_credits' in field_list:
+            subq = select(db.StoryArcIssue.story_arc_id).distinct() \
+                    .select_from(db.IssueTeam).where(db.IssueTeam.team_id == db_record.id) \
+                    .join(db.StoryArcIssue, db.StoryArcIssue.issue_id == db.IssueTeam.issue_id).subquery()
+            query: list = self.session.execute(
+                select(db.StoryArc.id, db.StoryArc.name, db.StoryArc.api_detail_url, db.StoryArc.site_detail_url) \
+                    .join(subq, db.StoryArc.id == subq.c.story_arc_id)).all()
+            response_dict['story_arc_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        if 'volume_credits' in field_list:
+            subq = select(db.Issue.volume_id).distinct() \
+                    .select_from(db.IssueTeam).where(db.IssueTeam.team_id == db_record.id) \
+                    .join(db.Issue, db.Issue.id == db.IssueTeam.issue_id).subquery()
+            query: list = self.session.execute(
+                select(db.Volume.id, db.Volume.name, db.Volume.api_detail_url, db.Volume.site_detail_url) \
+                    .join(subq, db.Volume.id == subq.c.volume_id)).all()
+            response_dict['volume_credits'] = self._rows_to_list(query, api.SiteLinkedEntity)
+
+        return {k:v for k,v in response_dict.items() if k in field_list}
 
     def team(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailTeam]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_single_response(int(item_id), params, db.Team, api.DetailTeam,
+                self._get_team_data)  # ty:ignore[invalid-return-type]
 
     def teams(self, params: api.FilterParams) -> api.MultiResponse[api.BaseTeam]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_multi_response(params, db.Team, api.BaseTeam,
+                self._get_team_data)  # ty:ignore[invalid-return-type]
+
+    def _get_volume_data(self, db_record: db.Volume, field_list: list[str]) -> dict:
+        direct_copy_fields = [*self._base_entity_fields, 'start_year']
+
+        response_dict = {}
+
+        for copy_field in direct_copy_fields:
+            response_dict[copy_field] = getattr(db_record, copy_field)
+
+        response_dict['date_added'] = self._datetime_format(db_record.date_added)
+        response_dict['date_last_updated'] = self._datetime_format(db_record.date_last_updated)
+        response_dict['publisher'] = db_record.publisher.summary if db_record.publisher is not None else None
+
+        if 'issues' in field_list or 'count_of_issues' in field_list or \
+             'first_issue' in field_list or 'last_issue' in field_list:
+            query: list = self.session.execute(
+                select(db.Issue.id, db.Issue.name, db.Issue.api_detail_url, db.Issue.site_detail_url, db.Issue.issue_number) \
+                    .where(db.Issue.volume_id == db_record.id) \
+                    .order_by(asc(db.Issue.cover_date))).all()
+            response_dict['count_of_issues'] = len(query)
+            response_dict['issues'] = self._rows_to_list(query, api.LinkedIssue)
+            if len(query) > 0:
+                response_dict['first_issue'] = query[0]._asdict()
+                response_dict['last_issue'] = query[-1]._asdict()
+
+        if 'characters' in field_list:
+            query: list = self.session.execute(
+                select(db.Character.id, db.Character.name, db.Character.api_detail_url, db.Character.site_detail_url,
+                         cast(func.count(db.Issue.id), String).label('count')) \
+                    .join(db.IssueCharacter, db.Character.id == db.IssueCharacter.character_id) \
+                    .join(db.Issue, db.Issue.id == db.IssueCharacter.issue_id) \
+                    .where(db.Issue.volume_id == db_record.id) \
+                    .group_by(db.Character.id).order_by(text('count DESC'))).all()
+            response_dict['characters'] = self._rows_to_list(query, api.CountedSiteLinkedEntity)
+
+        if 'locations' in field_list:
+            query: list = self.session.execute(
+                select(db.Location.id, db.Location.name, db.Location.api_detail_url, db.Location.site_detail_url,
+                         cast(func.count(db.Issue.id), String).label('count')) \
+                    .join(db.IssueLocation, db.Location.id == db.IssueLocation.location_id) \
+                    .join(db.Issue, db.Issue.id == db.IssueLocation.issue_id) \
+                    .where(db.Issue.volume_id == db_record.id) \
+                    .group_by(db.Location.id).order_by(text('count DESC'))).all()
+            response_dict['locations'] = self._rows_to_list(query, api.CountedSiteLinkedEntity)
+
+        # This is actually broken in ComicVine - they return the characters again under the objects element
+        # So technically this is a bug?
+        if 'objects' in field_list:
+            query: list = self.session.execute(
+                select(db.Object.id, db.Object.name, db.Object.api_detail_url, db.Object.site_detail_url,
+                         cast(func.count(db.Issue.id), String).label('count')) \
+                    .join(db.IssueObject, db.Object.id == db.IssueObject.object_id) \
+                    .join(db.Issue, db.Issue.id == db.IssueObject.issue_id) \
+                    .where(db.Issue.volume_id == db_record.id) \
+                    .group_by(db.Object.id).order_by(text('count DESC'))).all()
+            response_dict['objects'] = self._rows_to_list(query, api.CountedSiteLinkedEntity)
+
+        return {k:v for k,v in response_dict.items() if k in field_list}
 
     def volume(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.DetailVolume]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_single_response(int(item_id), params, db.Volume, api.DetailVolume,
+                self._get_volume_data)  # ty:ignore[invalid-return-type]
 
     def volumes(self, params: api.FilterParams) -> api.MultiResponse[api.BaseVolume]:
-        raise NotImplementedError("Route not implemented by trunk")
+        return self._generate_multi_response(params, db.Volume, api.BaseVolume,
+                self._get_volume_data)  # ty:ignore[invalid-return-type]
 
     ## The trunk only supports comic data
     def episode(self, item_id: int, params: api.CommonParams) -> api.SingleResponse[api.BaseModelExtra]:

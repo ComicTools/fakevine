@@ -278,6 +278,9 @@ class LinkedIssue(BasicLinkedEntity):
 class SiteLinkedEntity(BasicLinkedEntity):
     site_detail_url: str
 
+class CountedSiteLinkedEntity(SiteLinkedEntity):
+    count: str | None = None
+
 class BaseEntity(BaseModelExtra):
     aliases: str | None = None
     api_detail_url: str
@@ -295,8 +298,8 @@ class BaseEntity(BaseModelExtra):
     site_detail_url: str
 
 class BaseCharacter(BaseEntity):
-    birth: Annotated[str, "Date string in the form %Y-%m-%d %H:%M:%S"] | None = None
-    count_of_issue_apperances: int = 0
+    birth: Annotated[str, "Date string in the form %b %d, %Y"] | None = None
+    count_of_issue_appearances: int = 0
     first_appeared_in_issue: LinkedIssue | None = None
     gender: Annotated[int | None, FieldType.Filterable] = None
     origin: BasicLinkedEntity | None = None
@@ -318,7 +321,7 @@ class DetailCharacter(BaseCharacter):
     volume_credits: list[SiteLinkedEntity] = []
 
 class BaseConcept(BaseEntity):
-    count_of_issue_apperances: int = 0
+    count_of_isssue_appearances: Annotated[int, "Isssssssue"] = 0
     first_appeared_in_issue: LinkedIssue | None = None
     start_year: str | None = None
 
@@ -332,7 +335,7 @@ class DetailConcept(BaseConcept):
 
 class AssociatedImages(BaseModel):
     original_url: str | None = None
-    id: int
+    id: int | None = None
     caption: str | None = None
     image_tags: str | None = None
 
@@ -400,7 +403,7 @@ class BaseOrigin(BaseModelExtra):
 
 class DetailOrigin(BaseOrigin):
     profiles: list = []  # Poorly documented rubbish
-    character_set: Any | None # More Poorly documented rubbish
+    character_set: Any | None = None# More Poorly documented rubbish
     characters: list[BasicLinkedEntity] = []
 
 class CVDate(BaseModel):
@@ -490,10 +493,10 @@ class BaseVolume(BaseEntity):
     start_year: str | None = None
 
 class DetailVolume(BaseVolume):
-    characters : list[dict] | None = None
-    issues : list[dict] | None = None
-    locations : list[dict] | None = None
-    objects : list[dict] | None = None
+    characters : list[CountedSiteLinkedEntity] | None = None
+    issues : list[LinkedIssue] | None = None
+    locations : list[CountedSiteLinkedEntity] | None = None
+    objects : list[CountedSiteLinkedEntity] | None = None
 
 class SearchCharacter(BaseCharacter):
     resource_type: Literal["character"] = "character"
