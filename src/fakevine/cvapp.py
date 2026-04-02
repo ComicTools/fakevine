@@ -180,7 +180,7 @@ class CVApp:
                 status_code, data= self._exception_responses[type(ex)]
             except ValidationError as ex:
                 for ex_error in ex.errors():
-                    error_loc = '->'.join(list(ex_error["loc"]))  # ty:ignore[no-matching-overload]
+                    error_loc = '->'.join(map(str,list(ex_error["loc"])))  # ty:ignore[no-matching-overload]
                     input_summary = f"{str(ex_error["input"])[:100]}{' ...' if len(str(ex_error["input"])) > 100 else ''}"  # noqa: PLR2004
                     error_msg = f"{ex_error["msg"]}: {error_loc}: {input_summary}"
                     logger.error(error_msg)

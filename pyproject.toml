@@ -9,10 +9,11 @@ authors = [
 requires-python = ">=3.14"
 dependencies = [
     "aiohttp-client-cache[sqlite]>=0.14.3",
+    "aiosqlite>=0.22.1",
     "fastapi>=0.134.0",
     "loguru>=0.7.3",
     "lxml>=6.0.2",
-    "sqlalchemy>=2.1.0b1",
+    "sqlalchemy[asyncio]>=2.1.0b1",
     "typer>=0.24.1",
     "types-lxml>=2026.2.16",
     "uvicorn>=0.41.0",
