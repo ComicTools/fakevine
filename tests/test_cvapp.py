@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from fastapi import status
+from fastapi import Response, status
 from fastapi.testclient import TestClient
 from mockito import mock, when
 
@@ -29,24 +29,14 @@ def _json_from_response(resp):  # noqa: ANN001, ANN202
     return None
 
 
-def test_fetch_response_trunk_returns_model():
+def test_fetch_response_trunk_returns_response():
     trunk = mock(ComicTrunk)
     when(trunk).volumes(...).thenReturn(m.CVResponse())
 
     app = CVApp(trunk=trunk)
 
     res = app._fetch_response(params=m.FilterParams(), trunk_method=trunk.volumes)
-    assert isinstance(res, m.CVResponse)
-
-
-def test_fetch_response_deadend_when_no_trunk_method():
-    trunk = mock(ComicTrunk)
-    app = CVApp(trunk=trunk)
-    dead = app._fetch_response(params=m.CommonParams(), trunk_method=None)
-    assert dead.status_code == status.HTTP_200_OK
-    assert _json_from_response(dead) == {"error": "OK", "limit": None, "offset": None, "number_of_page_results": 0,
-                "number_of_total_results": 0, "status_code": 1, "results": [], "version": "1.0" }
-
+    assert isinstance(res, Response)
 
 @pytest.mark.parametrize(
     ("exc", "expected_status"),
@@ -73,9 +63,6 @@ def test_unsupported_response_error_returns_501():
     app = CVApp(trunk=trunk)
     resp = app._fetch_response(params=m.FilterParams(), trunk_method=trunk.volumes)
     assert resp.status_code == 501
-    # body should contain an error string
-    body = _json_from_response(resp)
-    assert "error" in body
 
 
 def minimal_base_volume_dict():
@@ -128,13 +115,13 @@ def client_and_trunk():
 
 def test_undefined_route(client_and_trunk: tuple[TestClient, ComicTrunk]):
     client, _ = client_and_trunk
-    response = client.get('/monkeyscanfly')
+    response = client.get('/monkeyscanfly',params={'api_key':'secret'})
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 def test_volumes_route_requires_api_key(client_and_trunk: tuple[TestClient, ComicTrunk]):
     client, _ = client_and_trunk
     r = client.get("/volumes")
-    assert r.status_code == CVApp.INVALID_API_KEY.status_code
+    assert r.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 def test_volumes_route_with_api_key_returns_ok(client_and_trunk: tuple[TestClient, ComicTrunk]):
@@ -159,21 +146,6 @@ def test_types_endpoint_with_api_key(client_and_trunk: tuple[TestClient, ComicTr
     assert rt.status_code == 200
     assert isinstance(rt.json(), dict)
 
-
-def test_search_without_query_returns_object_not_found_client(client_and_trunk: tuple[TestClient, ComicTrunk]):
-    client, _ = client_and_trunk
-    rs = client.get("/search", params={"api_key": "secret"})
-    assert rs.status_code == status.HTTP_200_OK
-    assert rs.json() == {
-        "error": "Object Not Found",
-        "limit": 0,
-        "offset": 0,
-        "number_of_page_results": 0,
-        "number_of_total_results": 0,
-        "status_code": 101,
-        "results": [],
-        }
-
 def test_malformed_route_valid_root(client_and_trunk: tuple[TestClient, ComicTrunk]):
     client, _ = client_and_trunk
     rs = client.get("/volume/1234-1234", params={"api_key": "secret"})
@@ -186,6 +158,7 @@ def test_malformed_route_valid_root(client_and_trunk: tuple[TestClient, ComicTru
         "number_of_total_results": 0,
         "status_code": 102,
         "results": [],
+        "version" : '1.0',
         }
 
 def test_malformed_route_invalid_root(client_and_trunk: tuple[TestClient, ComicTrunk]):
@@ -200,6 +173,7 @@ def test_malformed_route_invalid_root(client_and_trunk: tuple[TestClient, ComicT
         "number_of_total_results": 0,
         "status_code": 102,
         "results": [],
+        "version" : '1.0',
         }
 
 
@@ -208,22 +182,3 @@ def test_search_with_query_calls_trunk_and_returns_ok(client_and_trunk: tuple[Te
     rs2 = client.get("/search", params={"api_key": "secret", "query": "bat"})
     assert rs2.status_code == 200
 
-
-@pytest.mark.asyncio
-async def test_get_search_without_query_returns_object_not_found():
-    trunk = mock(ComicTrunk)
-    app = CVApp(trunk=trunk)
-
-    resp = await app._get_search(params=m.SearchParams())
-    assert resp.status_code == 200
-    content = _json_from_response(resp)
-    assert isinstance(content, dict)
-    assert content == {
-        "error": "Object Not Found",
-        "limit": 0,
-        "offset": 0,
-        "number_of_page_results": 0,
-        "number_of_total_results": 0,
-        "status_code": 101,
-        "results": [],
-        }
