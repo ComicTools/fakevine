@@ -1,7 +1,7 @@
 # ruff: noqa: D101, FIX002
 import datetime
 from enum import Enum
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -9,6 +9,7 @@ from pydantic import (
     Field,
     computed_field,
     create_model,
+    field_validator,
 )
 
 CV_STATUS_CODES: dict[int, str] = {
@@ -201,7 +202,7 @@ def optional_model(model_cls: type[BaseModelExtra]) -> type[BaseModelExtra]:
     for f_name, f_info in model_cls.model_fields.items():
         f_dct = f_info.asdict()
         new_fields[f_name] = (
-            Annotated[f_dct['annotation'] | None, *f_dct['metadata'], Field(**f_dct['attributes'])],  # noqa: F821
+            Annotated[f_dct['annotation'] | None, Field(**f_dct['attributes']), *f_dct['metadata']],  # noqa: F821
             None,
         )
 
@@ -217,6 +218,11 @@ class CommonParams(BaseModel):
     api_key: str | None = None
     format: Literal['json', 'xml', 'jsonp'] = 'json'
     field_list: Annotated[str | None, "Comma delimited list of fields"] = None
+
+    @field_validator('format', mode='before')
+    @classmethod
+    def validate_command(cls, v: str) -> str:  # noqa: D102
+        return v.lower()
 
 class FilterParams(CommonParams):
     limit: int = Field(100, gt=0, le=100)
@@ -241,10 +247,11 @@ class CVResponse(BaseModel):
     number_of_page_results: int = Field(0, ge=0)
     number_of_total_results: int = Field(0, ge=0)
     status_code: Literal[1, 100, 101, 102, 103, 104, 105, 107] = 1
-    results: list[dict] | dict = []
+    results: list[BaseModelExtra] | BaseModelExtra = []
     version: str | None = "1.0"
 
 class BaseModelExtra(BaseModel):
+    _entity_name: str = 'entity'
     model_config = ConfigDict(extra='allow')
 
 class SingleResponse[T](CVResponse):
@@ -298,7 +305,7 @@ class BaseEntity(BaseModelExtra):
     site_detail_url: str
 
 class BaseCharacter(BaseEntity):
-    birth: Annotated[str, "Date string in the form %b %d, %Y"] | None = None
+    birth: Annotated[str | None, "Date string in the form %b %d, %Y"] = None
     count_of_issue_appearances: int = 0
     first_appeared_in_issue: LinkedIssue | None = None
     gender: Annotated[int | None, FieldType.Filterable] = None
@@ -412,7 +419,7 @@ class CVDate(BaseModel):
     timezone_type: Annotated[Literal[3], "Can't find evidence of any other value than 3 here"] = 3
 
 class BasePerson(BaseEntity):
-    birth: Annotated[str, "Date string in the form %Y-%m-%d %H:%M:%S"] | None = None
+    birth: Annotated[str, "Date string in the form %Y-%m-%d %H:%M:%S", FieldType.DateTime] | None = None
     country: str | None = None
     count_of_isssue_appearances: Annotated[int, "Yes, isssue.  You want to fight about it?  Always null."] | None = None
     death: Annotated[CVDate, "Of course this is an entirely different format to birth.  Of course it is."] | None = None
@@ -533,3 +540,4 @@ class SearchTeam(BaseTeam):
 
 SearchResponse = MultiResponse[SearchCharacter | SearchConcept | SearchIssue | SearchObject | SearchOrigin | \
         SearchPerson | SearchPublisher | SearchStoryArc | SearchTeam | SearchVolume | BaseEntity]
+

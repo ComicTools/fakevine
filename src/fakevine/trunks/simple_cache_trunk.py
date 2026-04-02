@@ -65,14 +65,14 @@ class SimpleCacheTrunk(ComicTrunk):
 
     def _process_response(self, endpoint: str, params: CommonParams, response_collection: type[SingleResponse | MultiResponse], \
                 result_model: type[BaseModelExtra]) -> SingleResponse[type[BaseModelExtra]] | MultiResponse[type[BaseModelExtra]]:
-            params.api_key = self.cv_api_key
+            modified_params = params.model_copy(update={'api_key' : self.cv_api_key, 'format' : 'json'})
+            response = self._session.get(f'{self.cv_api_url}{endpoint}', params=modified_params, headers=self.headers)
+
             if params.field_list is None or params.field_list == []:
                 return_class = result_model
             else:
                 field_list = params.field_list.split(',')
                 return_class = filtered_model(result_model, field_list)
-
-            response = self._session.get(f'{self.cv_api_url}{endpoint}', params=params, headers=self.headers)
 
             if response.status_code != 200:  # noqa: PLR2004
                 if response.status_code in self.response_map:
@@ -83,8 +83,8 @@ class SimpleCacheTrunk(ComicTrunk):
             return response_collection[return_class].model_validate(response.json())  # ty:ignore[invalid-return-type, unresolved-attribute]
 
     def search(self, params: SearchParams) -> SearchResponse:
-        params.api_key = self.cv_api_key
-        response = self._session.get(f'{self.cv_api_url}/search', params=params, headers=self.headers)
+        modified_params = params.model_copy(update={'api_key' : self.cv_api_key, 'format' : 'json'})
+        response = self._session.get(f'{self.cv_api_url}/search', params=modified_params, headers=self.headers)
 
         if response.status_code != 200:  # noqa: PLR2004
             if response.status_code in self.response_map:

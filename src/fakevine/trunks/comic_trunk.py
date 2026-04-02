@@ -15,6 +15,12 @@ class RequestLimitError(Exception):
 class AuthenticationError(Exception):
     """Thrown for API key problems."""
 
+class URLFormatError(Exception):
+    """Thrown for URL formatting errors."""
+
+class ObjectNotFoundError(Exception):
+    """Thrown for missing entity IDs."""
+
 class UnsupportedResponseError(Exception):
     """Catch all for anything new and not yet covered (cloudflare?)."""
 

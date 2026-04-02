@@ -5,10 +5,12 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from loguru import logger
+from lxml import etree
 from pydantic_core import ValidationError
 
 from fakevine.models import cvapimodels
 from fakevine.models.cvapimodels import (
+    BaseModelExtra,
     CommonParams,
     CVResponse,
     FilterParams,
@@ -21,15 +23,17 @@ from fakevine.trunks.comic_trunk import (
     AuthenticationError,
     ComicTrunk,
     GatewayError,
+    ObjectNotFoundError,
     RateLimitError,
     RequestLimitError,
     UnsupportedResponseError,
+    URLFormatError,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from pydantic import BaseModel
+    from lxml.etree._element import _Element
 
 
 class CVApp:
@@ -50,30 +54,6 @@ class CVApp:
 
     """
 
-    OBJECT_NOT_FOUND: JSONResponse = JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={key:value for key, value in
-            jsonable_encoder(CVResponse(limit=0, status_code=101)).items() if key != 'version'})
-    INVALID_API_KEY: JSONResponse = JSONResponse(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        content={key:value for key, value in
-            jsonable_encoder(CVResponse(limit=0, status_code=100)).items() if key != 'version'})
-    RATE_LIMITED: HTMLResponse = HTMLResponse(
-        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        content=r"<title>429</title>429 Too Many Requests")
-    REQUEST_LIMIT_BREACH: JSONResponse = JSONResponse(
-        status_code=420,
-        content={key:value for key, value in
-            jsonable_encoder(CVResponse(limit=0, status_code=107)).items() if key != 'version'})
-    DEADEND_RESPONSE: JSONResponse = JSONResponse(
-        status_code=status.HTTP_200_OK,
-        content={"error": "OK", "limit": None, "offset": None, "number_of_page_results": 0,
-                "number_of_total_results": 0, "status_code": 1, "results": [], "version": "1.0" })
-    URL_FORMAT_ERROR: JSONResponse = JSONResponse(
-        status_code=status.HTTP_404_NOT_FOUND,
-        content={key:value for key, value in
-            jsonable_encoder(CVResponse(limit=0, status_code=102)).items() if key != 'version'})
-
     app: FastAPI
     api_key: str | None = None
     trunk: ComicTrunk
@@ -91,12 +71,15 @@ class CVApp:
         self.app = FastAPI(exception_handlers={RequestValidationError : self._validation_exception_handler})
         self._attach_routes()
 
-        self._exception_responses = {
-            RateLimitError : CVApp.RATE_LIMITED,
-            AuthenticationError : CVApp.INVALID_API_KEY,
-            RequestLimitError : CVApp.REQUEST_LIMIT_BREACH,
-            GatewayError: HTMLResponse(status_code=status.HTTP_502_BAD_GATEWAY,
-                content="<html><title>502 Bad Gateway</title><body>502 Bad Gateway</body></html>"),
+        self._exception_responses:dict[type[Exception], tuple[int, CVResponse | str]] = {
+            RateLimitError : (status.HTTP_429_TOO_MANY_REQUESTS, r"<title>429</title>429 Too Many Requests"),
+            AuthenticationError : (status.HTTP_401_UNAUTHORIZED, CVResponse(limit=0, status_code=100)),
+            RequestLimitError : (420, CVResponse(limit=0, status_code=107)),
+            ObjectNotFoundError : (status.HTTP_200_OK, CVResponse(limit=0, status_code=101)),
+            UnsupportedResponseError : (status.HTTP_501_NOT_IMPLEMENTED, "Response not handled"),
+            NotImplementedError : (status.HTTP_501_NOT_IMPLEMENTED, "Not supported by trunk"),
+            URLFormatError : (status.HTTP_404_NOT_FOUND, CVResponse(limit=0, status_code=102)),
+            GatewayError: (status.HTTP_502_BAD_GATEWAY, "<html><title>502 Bad Gateway</title><body>502 Bad Gateway</body></html>"),
         }
 
     async def _validation_exception_handler(self, request: Request, exc: RequestValidationError) -> Response:  # noqa: ARG002
@@ -115,7 +98,7 @@ class CVApp:
             ('/character/4005-{character_id}', self._get_character, "Character Detail", True),
             ('/characters', self._get_characters, "Character Search", True),
             ('/chat/2450-{item_id}', self._get_object_not_found, "Chat Detail", False),
-            ('/chats', self._get_cv_deadend, "Chat Search", False),
+            ('/chats', self._get_object_not_found, "Chat Search", False),
             ('/concept/4015-{concept_id}', self._get_concept, "Concept Detail", True),
             ('/concepts', self._get_concepts, "Concept Search", True),
             ('/episode/4070-{episode_id}', self._get_episode, "Episode Detail", True),
@@ -135,7 +118,7 @@ class CVApp:
             ('/power/4035-{power_id}', self._get_power, "Power Detail", True),
             ('/powers', self._get_powers, "Power Search", True),
             ('/promo/1700-{promo_id}', self._get_object_not_found, "Promo Detail", False),
-            ('/promos', self._get_cv_deadend, "Promo Search", False),
+            ('/promos', self._get_object_not_found, "Promo Search", False),
             ('/publisher/4010-{publisher_id}', self._get_publisher, "Publisher Detail", True),
             ('/publishers', self._get_publishers, "Publisher Search", True),
             ('/search', self._get_search, "General Search", True),
@@ -156,7 +139,7 @@ class CVApp:
             ('/volume/4050-{volume_id}', self._get_volume, "Volume Detail", True),
             ('/{any_id}/{other_id}', self._get_url_format_error, "URL Format Error", False),
             ('/{any_id}/{other_id}-{id_other}', self._get_url_format_error, "URL Format Error", False),
-            ('/*', self._get_undefined, "Catch All", False),
+            ('/{any_id}', self._get_url_format_error, "URL Format Error", False),
         ]
 
         for route in routes:
@@ -167,7 +150,7 @@ class CVApp:
                 name=route[2],
                 include_in_schema=route[3])
 
-    def _fetch_response(self, params: CommonParams, trunk_method: Callable | None, item_id: int | None = None) -> Response:
+    def _fetch_response(self, params: CommonParams, trunk_method: Callable, item_id: int | None = None) -> Response:
         """Handle passing parameters to the ComicTrunk and processing the response into the correct format.
 
         Args:
@@ -180,40 +163,38 @@ class CVApp:
 
         """
         if self.api_key is not None and params.api_key is None:
-            return CVApp.INVALID_API_KEY
+            status_code, data = self._exception_responses[AuthenticationError]
 
         # TODO@falo2k:  Process conversion of responses into other formats
         # https://github.com/falo2k/fakevine/issues/2
-        if params.format != "json":
-            return CVApp.OBJECT_NOT_FOUND
-
-        if trunk_method is None:
-            data = self.DEADEND_RESPONSE
+        elif params.format == "jsonp":
+            status_code, data = self._exception_responses[UnsupportedResponseError]
         else:
             try:
                 data = trunk_method(params=params) if item_id is None else trunk_method(item_id=item_id, params=params)
+                status_code=status.HTTP_200_OK
 
-            except (RateLimitError, AuthenticationError, RequestLimitError, GatewayError) as ex:
-                return self._exception_responses[type(ex)]  # ty:ignore[invalid-argument-type]
-            except (UnsupportedResponseError, NotImplementedError) as ex:
-                error_msg = f"Response not handled ({trunk_method.__name__}): {ex}"  # ty:ignore[unresolved-attribute]
-                logger.warning(error_msg)
-                return JSONResponse(status_code=status.HTTP_501_NOT_IMPLEMENTED, content={'error':error_msg})
+            except (RateLimitError, AuthenticationError, RequestLimitError, GatewayError, URLFormatError, ObjectNotFoundError,
+                    UnsupportedResponseError, NotImplementedError) as ex:
+                status_code, data= self._exception_responses[type(ex)]
             except ValidationError as ex:
                 for ex_error in ex.errors():
                     error_loc = '->'.join(list(ex_error["loc"]))  # ty:ignore[no-matching-overload]
                     input_summary = f"{str(ex_error["input"])[:100]}{' ...' if len(str(ex_error["input"])) > 100 else ''}"  # noqa: PLR2004
                     error_msg = f"{ex_error["msg"]}: {error_loc}: {input_summary}"
                     logger.error(error_msg)
-                return JSONResponse(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    content=jsonable_encoder({"errors": ex.errors()}),
-                )
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT
+                data=ex.errors()
 
-            # TODO@falo2k:  Process conversion of responses into other formats
-            # https://github.com/falo2k/fakevine/issues/2
+        if not isinstance(data, CVResponse):
+            return HTMLResponse(content=data, status_code=status_code)
 
-        return data
+        if params.format == "json":
+            return JSONResponse(content=jsonable_encoder(data), status_code=status_code)
+
+        # Must be XML at this point as format should have been validated by the model to json/jsonp/xml
+
+        return Response(content=cvresponse_to_xml(data), status_code=status_code, media_type="application/xml")
 
     async def _get_volumes(self, params: Annotated[FilterParams, Query()]) -> Response:
         params.sort = validate_sort_order(params.sort, cvapimodels.BaseVolume)
@@ -226,9 +207,6 @@ class CVApp:
         return self._fetch_response(params=params, trunk_method=self.trunk.volume, item_id=volume_id)
 
     async def _get_search(self, params: Annotated[SearchParams, Query()]) -> Response:
-        if params.query is None:
-            return CVApp.OBJECT_NOT_FOUND
-
         search_models: list[type[cvapimodels.BaseModelExtra]]= [
             cvapimodels.BaseCharacter,
             cvapimodels.BaseConcept,
@@ -445,14 +423,97 @@ class CVApp:
     async def _get_video_categories(self, params: Annotated[FilterParams, Query()]) -> Response:
         return self._fetch_response(params=params, trunk_method=self.trunk.video_categories)
 
-    async def _get_cv_deadend(self, params: Annotated[CommonParams, Query()]) -> Response:
-        return self._fetch_response(params=params, trunk_method=None)
-
     async def _get_object_not_found(self, params: Annotated[CommonParams, Query()]) -> Response:
-        return self._fetch_response(params=params, trunk_method=lambda *_, **__: self.OBJECT_NOT_FOUND, item_id=None)
+        return self._fetch_response(params=params, trunk_method=lambda *_, **__: (_ for _ in ()).throw(ObjectNotFoundError), item_id=None)
 
     async def _get_url_format_error(self, params: Annotated[CommonParams, Query()]) -> Response:
-        return self._fetch_response(params=params, trunk_method=lambda *_, **__: self.URL_FORMAT_ERROR, item_id=None)
+        return self._fetch_response(params=params, trunk_method=lambda *_, **__: (_ for _ in ()).throw(URLFormatError), item_id=None)
 
-    async def _get_undefined(self) -> HTMLResponse:
-        return HTMLResponse(content="Unknown route", status_code=status.HTTP_404_NOT_FOUND)
+xml_resource_naming: dict[str, str] = {
+    'characters' : 'character',
+    'character_enemies' : 'character',
+    'character_friends' : 'character',
+    'people' : 'person',
+    'objects' : 'object',
+    'issue_credits' : 'issue',
+}
+
+def cvresponse_to_xml(response: CVResponse) -> str:
+    """Encode the CVResponse object as XML."""
+    root: _Element = etree.Element('response')
+    etree.SubElement(root, 'error').text= etree.CDATA(response.error)  # ty:ignore[invalid-argument-type]
+    etree.SubElement(root, 'limit').text = str(response.limit)
+    etree.SubElement(root, 'offset').text = str(response.offset)
+    etree.SubElement(root, 'number_of_page_results').text = str(response.number_of_page_results)
+    etree.SubElement(root, 'number_of_total_results').text = str(response.number_of_total_results)
+    etree.SubElement(root, 'status_code').text = str(response.status_code)
+    results = etree.SubElement(root, 'results')
+
+    if response.results is not None and response.results != []:
+        if isinstance(response.results, BaseModelExtra):
+            entity_to_xml(response.results, results)
+        elif isinstance(response.results, list):
+            for entity in response.results:
+                container = etree.SubElement(results, entity._entity_name)  # noqa: SLF001
+                entity_to_xml(entity, container)
+        elif isinstance(response.results, dict):
+            # Should only be used for the currently unmodelled endpoints
+            for entry, value in response.results.items():
+                etree.SubElement(results, entry).text = etree.CDATA(value) if isinstance(value, str) else str(value)
+        else:
+            logger.warning(f'Unrecognised attribute type for response results: {type(response.results)}')
+
+    etree.SubElement(root, 'version').text = response.version
+
+    return etree.tostring(root, encoding='utf8').decode()
+
+def entity_to_xml(entity: cvapimodels.BaseModelExtra, parent: _Element) -> None:  # noqa: C901, PLR0912
+    """Encode a response entity as XML."""
+    for field_name, field_info in entity.model_fields.items():
+        if getattr(entity, field_name) is None:
+            etree.SubElement(parent, field_name)
+            continue
+
+        field = getattr(entity, field_name)
+
+        if isinstance(field, int) or cvapimodels.FieldType.DateTime in field_info.metadata \
+            or 'FieldType.DateTime' in str(field_info.annotation):
+            etree.SubElement(parent, field_name).text = str(field)
+        elif isinstance(field, str):
+            etree.SubElement(parent, field_name).text = etree.CDATA(field)
+        elif isinstance(field, dict):
+            container = etree.SubElement(parent, field_name)
+            for k, v in field.items():
+                etree.SubElement(container, k).text = etree.CDATA(v) if isinstance(v, str) else str(v)
+        elif isinstance(field, cvapimodels.BasicLinkedEntity):
+            container = etree.SubElement(parent, field_name)
+            linkedentity_to_xml(field, container)
+        elif isinstance(field, cvapimodels.CVDate):
+            container = etree.SubElement(parent, field_name)
+            etree.SubElement(container, 'date').text = field.date
+            etree.SubElement(container, 'timezone').text = etree.CDATA(field.timezone)
+            etree.SubElement(container, 'timezone_type').text = str(field.timezone_type)
+        elif isinstance(field, list):
+            container = etree.SubElement(parent, field_name)
+            child_element_name = xml_resource_naming.get(field_name, field_name.split('_')[0] if '_' in field_name else field_name[:-1])
+            for child in field:
+                child_element = etree.SubElement(container, child_element_name)
+                if isinstance(child, cvapimodels.BasicLinkedEntity):
+                    linkedentity_to_xml(child, child_element)
+                else:
+                    child_element.text = etree.CDATA(str(child))
+
+def linkedentity_to_xml(entity: cvapimodels.BasicLinkedEntity, parent: _Element) -> None:
+    """Encode BasicLinkedEntity and subclasses to XML."""
+    etree.SubElement(parent, 'id').text = str(entity.id)
+    etree.SubElement(parent, 'api_detail_url').text = etree.CDATA(entity.api_detail_url)
+    etree.SubElement(parent, 'name').text = None if entity.name is None else etree.CDATA(entity.name)
+
+    if isinstance(entity, cvapimodels.SiteLinkedEntity):
+        etree.SubElement(parent, 'site_detail_url').text = etree.CDATA(entity.site_detail_url)
+
+    if isinstance(entity, cvapimodels.LinkedIssue):
+        etree.SubElement(parent, 'issue_number').text = None if entity.issue_number is None else str(entity.issue_number)
+
+    if isinstance(entity, cvapimodels.CountedSiteLinkedEntity):
+        etree.SubElement(parent, 'count').text = None if entity.count is None else str(entity.count)

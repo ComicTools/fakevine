@@ -11,7 +11,7 @@ from sqlalchemy.sql.expression import text
 
 from fakevine.models import cvapimodels as api
 from fakevine.models import cvdbmodels as db
-from fakevine.trunks.comic_trunk import ComicTrunk
+from fakevine.trunks.comic_trunk import ComicTrunk, ObjectNotFoundError
 
 if TYPE_CHECKING:
     import datetime
@@ -750,6 +750,9 @@ class StaticDBTrunk(ComicTrunk):
                 self._get_publisher_data)  # ty:ignore[invalid-return-type]
 
     def search(self, params: api.SearchParams) -> api.SearchResponse:
+        if params.query is None or params.query == "":
+            raise ObjectNotFoundError
+
         raise NotImplementedError("Route not yet implemented by trunk.  Prioritise the dedicated entity endpoints.")
 
     def _get_story_arc_data(self, db_record: db.StoryArc, field_list: list[str]) -> dict:
