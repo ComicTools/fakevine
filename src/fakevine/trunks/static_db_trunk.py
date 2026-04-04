@@ -1,8 +1,25 @@
 # ruff: noqa: EM101, D102
-from typing import TYPE_CHECKING, Any
+import re
+from typing import TYPE_CHECKING, Any, Coroutine
 
 from loguru import logger
-from sqlalchemy import Engine, Result, Row, Select, Sequence, String, asc, cast, create_engine, func, select
+from sqlalchemy import (
+    Engine,
+    Float,
+    Integer,
+    Result,
+    Row,
+    Select,
+    Sequence,
+    String,
+    asc,
+    cast,
+    create_engine,
+    func,
+    literal_column,
+    or_,
+    select,
+)
 from sqlalchemy.exc import DatabaseError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.sql.expression import text
@@ -155,6 +172,8 @@ class StaticDBTrunk(ComicTrunk):
             item_count_query = self._build_filtered_query(item_count_query, filter_list, return_class.model_fields)
 
             record_count: int = (await session.execute(item_count_query)).scalar()
+            if record_count is None:
+                record_count = 0
             item_rows: Sequence[Row] = (await session.execute(item_query)).all()
 
             if item_rows is None:
@@ -752,7 +771,129 @@ class StaticDBTrunk(ComicTrunk):
         if params.query is None or params.query == "":
             raise ObjectNotFoundError
 
-        raise NotImplementedError("Route not yet implemented by trunk.  Prioritise the dedicated entity endpoints.")
+        response_objects = []
+
+        if params.field_list is None or params.field_list == []:
+            character_model = api.SearchCharacter
+            concept_model = api.SearchConcept
+            issue_model = api.SearchIssue
+            location_model = api.SearchLocation
+            object_model = api.SearchObject
+            origin_model = api.SearchOrigin
+            person_model = api.SearchPerson
+            publisher_model = api.SearchPublisher
+            storyarc_model = api.SearchStoryArc
+            team_model = api.SearchTeam
+            volume_model = api.SearchVolume
+            entity_model = api.BaseEntity
+            return_class = api.SearchResponse
+        else:
+            field_list = params.field_list.split(',')
+            character_model = api.filtered_model(api.SearchCharacter, field_list)
+            concept_model = api.filtered_model(api.SearchConcept, field_list)
+            issue_model = api.filtered_model(api.SearchIssue, field_list)
+            location_model = api.filtered_model(api.SearchLocation, field_list)
+            object_model = api.filtered_model(api.SearchObject, field_list)
+            origin_model = api.filtered_model(api.SearchOrigin, field_list)
+            person_model = api.filtered_model(api.SearchPerson, field_list)
+            publisher_model = api.filtered_model(api.SearchPublisher, field_list)
+            storyarc_model = api.filtered_model(api.SearchStoryArc, field_list)
+            team_model = api.filtered_model(api.SearchTeam, field_list)
+            volume_model = api.filtered_model(api.SearchVolume, field_list)
+            entity_model = api.filtered_model(api.BaseEntity, field_list)
+            filtered_classes = character_model | concept_model | issue_model | location_model | object_model | \
+                origin_model | person_model | publisher_model | storyarc_model |  team_model | volume_model | entity_model
+            return_class = api.MultiResponse[filtered_classes]  # ty:ignore[invalid-type-form]
+
+        # Trunk doesn't support video, if it's the only parameter, then bow out
+        if params.resources is None or params.resources == "":
+            resources: list[str] = ["character", "concept", "origin", "object", "location", "issue", "story_arc",
+                                    "volume", "publisher", "person", "team"]
+        elif params.resources == "video":
+            raise ObjectNotFoundError
+        else:
+            resources: list[str] = [resource for resource in params.resources.split(',') if resource != 'video']
+
+        resource_map: dict[str, tuple[str, type[db.FTSBase], type[db.BaseTable], type[api.BaseModelExtra], Callable]] = {
+            "character": ("cv_character_fts", db.CharacterFTS, db.Character, character_model, self._get_character_data),
+            "concept": ("cv_concept_fts", db.ConceptFTS, db.Concept, concept_model, self._get_concept_data),
+            "origin": ("cv_origin_fts", db.OriginFTS, db.Origin, origin_model, self._get_origin_data),
+            "object": ("cv_object_fts", db.ObjectFTS, db.Object, object_model, self._get_object_data),
+            "location": ("cv_location_fts", db.LocationFTS, db.Location, location_model, self._get_location_data),
+            "issue": ("cv_issue_fts", db.IssueFTS, db.Issue, issue_model, self._get_issue_data),
+            "story_arc": ("cv_storyarc_fts", db.StoryArcFTS, db.StoryArc, storyarc_model, self._get_story_arc_data),
+            "volume": ("cv_volume_fts", db.VolumeFTS, db.Volume, volume_model, self._get_volume_data),
+            "publisher": ("cv_publisher_fts", db.PublisherFTS, db.Publisher, publisher_model, self._get_publisher_data),
+            "person": ("cv_person_fts", db.PersonFTS, db.Person, person_model, self._get_person_data),
+            "team": ("cv_team_fts", db.TeamFTS, db.Team, team_model, self._get_team_data),
+            #"video": ("cv_video_fts", ???, entity_model),  # noqa: ERA001
+        }
+
+        def clean_token(token: str) -> str:
+            dialect_string = String().literal_processor(dialect=self.db_engine.dialect)(value=token)
+            if re.search(r"[^a-zA-Z0-9]",dialect_string[1:-1]) is not None:
+                dialect_string = "'\"" + dialect_string[1:-1].replace('"', '') + "\"'"
+            return dialect_string
+
+        cleaned_query_tokens = [clean_token(token) for token in params.query.split(' ') if token != '']
+
+        # Create an empty selection to load unions against
+        selection_set = select(
+            literal_column("0", Integer).label('rowid'),
+            literal_column("'resource'", String).label('resource_type'),
+            literal_column("-0.0", Float).label('rank'))
+
+        selection_set = []
+
+        for resource in resources:
+            fts_table, fts_orm, *_ = resource_map[resource]
+            resource_query = select(fts_orm.rowid, literal_column(f"'{resource}'", String).label('resource_type'), text('rank'))
+            query_clauses = [text(f"{fts_table} MATCH {token}") for token in cleaned_query_tokens]
+            resource_query = resource_query.where(or_(*query_clauses))
+
+            selection_set.append(resource_query)
+
+        union_query = selection_set[0] if len(selection_set) == 1 else selection_set[0].union_all(*selection_set[1:])
+
+        count_query = union_query.order_by(text('rank'))
+        data_query = union_query.order_by(text('rank')).offset(params.offset).limit(params.limit)
+
+        async with self.session() as session:
+            item_count: int = (await session.execute(count_query)).scalar()
+            if item_count is None:
+                item_count = 0
+            data: Sequence[Row] = (await session.execute(data_query)).all()
+
+            if data is None:
+                    return api.SearchResponse(limit=0, status_code=101)
+
+            for result in data:
+                resource_type = result.resource_type
+                _, _, resource_db_table, resource_api_model, mapping_function = resource_map[resource_type]
+                item_query = select(resource_db_table).where(resource_db_table.id == result.rowid)
+                item_result = (await session.execute(item_query)).first()
+
+                if item_result is None:
+                    logger.error(f'FTS returned a result that could not be found in the data {resource_type}:{result.rowid}')
+                    continue
+
+                item_record = item_result[0]
+
+                if params.field_list is None or params.field_list == []:
+                    field_list = resource_api_model.model_fields.keys()
+
+                response_dict = await mapping_function(item_record, field_list, session)
+                response_object = resource_api_model(**response_dict)
+
+                response_objects.append(response_object)
+
+            return return_class(
+                limit=params.limit,
+                offset=params.offset,
+                number_of_page_results=len(response_objects),
+                number_of_total_results=item_count,
+                status_code=1,
+                results=response_objects)
 
     async def _get_story_arc_data(self, db_record: db.StoryArc, field_list: list[str], session: AsyncSession) -> dict:
         direct_copy_fields = [*self._base_entity_fields]

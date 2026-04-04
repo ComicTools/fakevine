@@ -125,6 +125,7 @@ class SimpleCacheTrunk(ComicTrunk):
                 filtered_model(SearchCharacter, field_list) | \
                 filtered_model(SearchConcept, field_list) | \
                 filtered_model(SearchIssue, field_list) | \
+                filtered_model(SearchLocation, field_list) | \
                 filtered_model(SearchObject, field_list) | \
                 filtered_model(SearchOrigin, field_list) | \
                 filtered_model(SearchPerson, field_list) | \

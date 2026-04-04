@@ -566,5 +566,5 @@ class SearchStoryArc(BaseStoryArc):
 class SearchTeam(BaseTeam):
     resource_type: Literal["team"] = "team"
 
-SearchResponse = MultiResponse[SearchCharacter | SearchConcept | SearchIssue | SearchObject | SearchOrigin | \
+SearchResponse = MultiResponse[SearchCharacter | SearchConcept | SearchIssue | SearchLocation | SearchObject | SearchOrigin | \
           SearchPerson | SearchPublisher | SearchStoryArc | SearchTeam | SearchVolume | BaseEntity]
