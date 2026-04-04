@@ -321,34 +321,12 @@ class LocalCVDBTrunk(ComicTrunk):
             raise ObjectNotFoundError
 
         if params.field_list is None or params.field_list == []:
-            character_model = api.SearchCharacter
-            concept_model = api.SearchConcept
-            issue_model = api.SearchIssue
-            object_model = api.SearchObject
-            origin_model = api.SearchOrigin
-            person_model = api.SearchPerson
-            publisher_model = api.SearchPublisher
-            storyarc_model = api.SearchStoryArc
-            team_model = api.SearchTeam
             volume_model = api.SearchVolume
-            entity_model = api.BaseEntity
             return_class = api.SearchResponse
         else:
             field_list = params.field_list.split(',')
-            character_model = api.filtered_model(api.SearchCharacter, field_list)
-            concept_model = api.filtered_model(api.SearchConcept, field_list)
-            issue_model = api.filtered_model(api.SearchIssue, field_list)
-            object_model = api.filtered_model(api.SearchObject, field_list)
-            origin_model = api.filtered_model(api.SearchOrigin, field_list)
-            person_model = api.filtered_model(api.SearchPerson, field_list)
-            publisher_model = api.filtered_model(api.SearchPublisher, field_list)
-            storyarc_model = api.filtered_model(api.SearchStoryArc, field_list)
-            team_model = api.filtered_model(api.SearchTeam, field_list)
             volume_model = api.filtered_model(api.SearchVolume, field_list)
-            entity_model = api.filtered_model(api.BaseEntity, field_list)
-            filtered_classes = character_model | concept_model | issue_model | object_model | \
-                origin_model | person_model | publisher_model | storyarc_model |  team_model | volume_model | entity_model
-            return_class = api.MultiResponse[filtered_classes]  # ty:ignore[invalid-type-form]
+            return_class = api.MultiResponse[volume_model]  # ty:ignore[invalid-type-form]
 
         if params.resources is None or params.resources == "" or "volume" in params.resources:
             api_model = volume_model
