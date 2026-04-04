@@ -21,6 +21,78 @@ if TYPE_CHECKING:
     from sqlalchemy.engine.reflection import Inspector
 
 
+fts_entities = ['character', 'concept', 'object', 'location', 'issue', 'storyarc', 'volume', 'publisher', 'person', 'team']
+
+def create_fts_tables(engine: Engine) -> None:
+    """Create full-text search tables for the database."""
+    with engine.connect() as connection:
+        # Origin has no "aliases" column
+        connection.execute(text("CREATE VIRTUAL TABLE cv_origin_fts USING fts5(name, content='cv_origin', content_rowid='id',"
+                                        "tokenize='porter unicode61 remove_diacritics 2')"))
+
+        for entity in fts_entities:
+            source_table_name = f'cv_{entity.lower()}'
+            fts_table_name = f'cv_{entity.lower()}_fts'
+
+            # Create virtual tables
+            table_statement = (f"CREATE VIRTUAL TABLE {fts_table_name} USING fts5("
+                    "name, aliases,"
+                    f"content='{source_table_name}', content_rowid='id',"
+                    "tokenize='porter unicode61 remove_diacritics 2')")
+            connection.execute(text(table_statement))
+
+def create_fts_triggers(engine: Engine) -> None:
+    """Create full-text search triggers for the database."""
+    with engine.connect() as connection:
+        # Origin has no "aliases" column
+        entity = 'origin'
+        source_table_name = f'cv_{entity.lower()}'
+        fts_table_name = f'cv_{entity.lower()}_fts'
+        insert_trigger = (f"CREATE TRIGGER {entity}_ai AFTER INSERT ON {source_table_name} BEGIN "  # noqa: S608
+            f"INSERT INTO {fts_table_name}(rowid, name) VALUES (new.id, new.name); "
+            "END;")
+        delete_trigger = (f"CREATE TRIGGER {entity}_ad AFTER DELETE ON {source_table_name} BEGIN "  # noqa: S608
+            f"INSERT INTO {fts_table_name}({fts_table_name}, rowid, name) VALUES ('delete', old.id, old.name); "
+            "END;")
+        update_trigger = (f"CREATE TRIGGER {entity}_au AFTER UPDATE ON {source_table_name} BEGIN "  # noqa: S608
+            f"INSERT INTO {fts_table_name}({fts_table_name}, rowid, name) VALUES ('delete', old.id, old.name); "
+            f"INSERT INTO {fts_table_name}(rowid, name) VALUES (new.id, new.name); "
+            "END;")
+        connection.execute(text(insert_trigger))
+        connection.execute(text(delete_trigger))
+        connection.execute(text(update_trigger))
+
+        for entity in fts_entities:
+            source_table_name = f'cv_{entity.lower()}'
+            fts_table_name = f'cv_{entity.lower()}_fts'
+
+            # Create triggers
+            insert_trigger = (f"CREATE TRIGGER {entity}_ai AFTER INSERT ON {source_table_name} BEGIN "  # noqa: S608
+                f"INSERT INTO {fts_table_name}(rowid, name, aliases) VALUES (new.id, new.name, new.aliases); "
+                "END;")
+            delete_trigger = (f"CREATE TRIGGER {entity}_ad AFTER DELETE ON {source_table_name} BEGIN "  # noqa: S608
+                f"INSERT INTO {fts_table_name}({fts_table_name}, rowid, name, aliases) VALUES ('delete', old.id, old.name, old.aliases); "
+                "END;")
+            update_trigger = (f"CREATE TRIGGER {entity}_au AFTER UPDATE ON {source_table_name} BEGIN "  # noqa: S608
+                f"INSERT INTO {fts_table_name}({fts_table_name}, rowid, name, aliases) VALUES ('delete', old.id, old.name, old.aliases); "
+                f"INSERT INTO {fts_table_name}(rowid, name, aliases) VALUES (new.id, new.name, new.aliases); "
+                "END;")
+            connection.execute(text(insert_trigger))
+            connection.execute(text(delete_trigger))
+            connection.execute(text(update_trigger))
+
+    connection.commit()
+
+def rebuild_fts_indexes(engine: Engine, entity: str) -> None:
+    """Rebuild FTS indexes."""
+    with engine.connect() as connection:
+        fts_table_name = f'cv_{entity.lower()}_fts'
+
+        rebuild_statement = (f"INSERT INTO {fts_table_name}({fts_table_name}) VALUES('rebuild');")
+        connection.execute(text(rebuild_statement))
+        connection.commit()
+
+
 def convert_db(reddit_db: Path, output_db: Path):
     # Basic sanity check that the input DB has the tables we want
     console.log("Validating input DB structure")
@@ -67,6 +139,9 @@ def convert_db(reddit_db: Path, output_db: Path):
     try:
         output_db_engine: Engine = create_engine(f"sqlite:///{output_db.absolute()}")
         cvdbmodels.Base.metadata.create_all(output_db_engine)
+
+        create_fts_tables(output_db_engine)
+
     except SQLAlchemyError as exc:
         console.log("Unknown SQLAlchmey error creating database")
         raise typer.Exit from exc
@@ -148,6 +223,32 @@ def convert_db(reddit_db: Path, output_db: Path):
         table_progress.stop()
         output_session.close()
         reddit_db_connection.close()
+
+    fts_progress = Progress(
+        TextColumn(" " * 13),
+        TextColumn("[progress.description]{task.description}", style='italic'),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console)
+    fts_progress.start()
+    console.log("Populating Full Text Search indexes")
+
+    try:
+        task_list: dict[str, TaskID] = {}
+        for entity_name in [*fts_entities, 'origin']:
+            task_list[entity_name] = fts_progress.add_task(entity_name, total=100, start=False)
+
+        for entity_name in [*fts_entities, 'origin']:
+            task_id = task_list[entity_name]
+            fts_progress.start_task(task_id)
+            rebuild_fts_indexes(output_db_engine, entity_name)
+            fts_progress.update(task_id, completed=100)
+    finally:
+        fts_progress.stop()
+
+    console.log("Creating FTS triggers")
+    create_fts_triggers(output_db_engine)
 
     console.log("All done! :white_check_mark:")
 

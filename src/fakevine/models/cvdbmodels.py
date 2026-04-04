@@ -51,14 +51,14 @@ class BaseEntity(BaseTable):
 class Character(BaseEntity, Base):
     birth: Mapped[datetime.date | None]
     gender: Mapped[int]
-    origin_id: Mapped[int | None]
+    origin_id: Mapped[int | None] = mapped_column(index=True)
     real_name: Mapped[str | None]
     origin: Mapped[Origin] = relationship(
         primaryjoin="Character.origin_id == Origin.id",
         foreign_keys="[Character.origin_id]",
         viewonly=True,
     )
-    publisher_id: Mapped[int | None]
+    publisher_id: Mapped[int | None] = mapped_column(index=True)
     publisher: Mapped[Publisher] = relationship(
         primaryjoin="Character.publisher_id == Publisher.id",
         foreign_keys="[Character.publisher_id]",
@@ -148,7 +148,7 @@ class Issue(BaseEntity, Base):
     # In the API, this would return "false" for None
     # Dropping from the model as a fairly useless field
     # has_staff_review: Mapped[dict[str, str] | None] = mapped_column(JSON)  # noqa: ERA001
-    volume_id: Mapped[int | None]
+    volume_id: Mapped[int | None] = mapped_column(index=True)
     volume: Mapped[Volume] = relationship(
         primaryjoin="Issue.volume_id == Volume.id",
         foreign_keys="[Issue.volume_id]",
@@ -314,7 +314,7 @@ class Publisher(BaseEntity, Base):
     )
 
 class StoryArc(BaseEntity, Base):
-    publisher_id: Mapped[int | None]
+    publisher_id: Mapped[int | None] = mapped_column(index=True)
     publisher: Mapped[Publisher] = relationship(
         primaryjoin="StoryArc.publisher_id == Publisher.id",
         foreign_keys="[StoryArc.publisher_id]",
@@ -329,7 +329,7 @@ class StoryArc(BaseEntity, Base):
     )
 
 class Team(BaseEntity, Base):
-    publisher_id: Mapped[int | None]
+    publisher_id: Mapped[int | None] = mapped_column(index=True)
     publisher: Mapped[Publisher] = relationship(
         primaryjoin="Team.publisher_id == Publisher.id",
         foreign_keys="[Team.publisher_id]",
@@ -379,7 +379,7 @@ class Type(Base):
     list_resource_name: Mapped[str] =  mapped_column(primary_key=True)
 
 class Volume(BaseEntity, Base):
-    publisher_id: Mapped[int | None]
+    publisher_id: Mapped[int | None] = mapped_column(index=True)
     publisher: Mapped[Publisher] = relationship(
         primaryjoin="Volume.publisher_id == Publisher.id",
         foreign_keys="[Publisher.id]",
@@ -498,3 +498,55 @@ class StoryArcIssue(Base):
 
     story_arc_id: Mapped[int] = mapped_column(primary_key=True, sort_order=-100)
     issue_id: Mapped[int] = mapped_column(primary_key=True)
+
+# FTS classes are declared in a separate base so they can be created manually and not appear in
+# the non-FTS metadata
+class FTSBase(DeclarativeBase):
+    @declared_attr.directive
+    def __tablename__(self) -> str:  # noqa: D105
+        return f'cv_{self.__name__.lower()[:-3]}_fts'
+
+    rowid: Mapped[int] = mapped_column(primary_key=True)
+
+class CharacterFTS(FTSBase):
+    name: Mapped[str | None]
+    aliases: Mapped[str | None]
+
+class ConceptFTS(FTSBase):
+    name: Mapped[str | None]
+    aliases: Mapped[str | None]
+
+class OriginFTS(FTSBase):
+    name: Mapped[str | None]
+
+class ObjectFTS(FTSBase):
+    name: Mapped[str | None]
+    aliases: Mapped[str | None]
+
+class LocationFTS(FTSBase):
+    name: Mapped[str | None]
+    aliases: Mapped[str | None]
+
+class IssueFTS(FTSBase):
+    name: Mapped[str | None]
+    aliases: Mapped[str | None]
+
+class StoryArcFTS(FTSBase):
+    name: Mapped[str | None]
+    aliases: Mapped[str | None]
+
+class VolumeFTS(FTSBase):
+    name: Mapped[str | None]
+    aliases: Mapped[str | None]
+
+class PublisherFTS(FTSBase):
+    name: Mapped[str | None]
+    aliases: Mapped[str | None]
+
+class PersonFTS(FTSBase):
+    name: Mapped[str | None]
+    aliases: Mapped[str | None]
+
+class TeamFTS(FTSBase):
+    name: Mapped[str | None]
+    aliases: Mapped[str | None]

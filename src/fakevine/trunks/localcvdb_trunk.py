@@ -6,14 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 from sqlalchemy import Engine, Row, Select, Sequence, String, asc, create_engine, func, literal, or_, select
-from sqlalchemy.dialects.oracle.oracledb import dialect_async
 from sqlalchemy.exc import DatabaseError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.sql.expression import text
 
 from fakevine.models import cvapimodels as api
 from fakevine.models import localcvdbmodels as db
-from fakevine.models.localcvdbmodels import VolumeFTS
 from fakevine.trunks.comic_trunk import ComicTrunk, ObjectNotFoundError
 
 if TYPE_CHECKING:
