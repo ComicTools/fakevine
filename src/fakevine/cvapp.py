@@ -522,7 +522,7 @@ def cvresponse_to_xml(response: CVResponse) -> str:
 
     etree.SubElement(root, 'version').text = response.version
 
-    return etree.tostring(root, encoding='utf8').decode()
+    return etree.tostring(root, xml_declaration=True, encoding='utf8').decode()
 
 def entity_to_xml(entity: cvapimodels.BaseModelExtra, parent: _Element) -> None:  # noqa: C901
     """Encode a response entity as XML."""
@@ -566,10 +566,10 @@ def linkedentity_to_xml(entity: cvapimodels.BasicLinkedEntity, parent: _Element)
     etree.SubElement(parent, 'api_detail_url').text = etree.CDATA(entity.api_detail_url)
     etree.SubElement(parent, 'name').text = None if entity.name is None else etree.CDATA(entity.name)
 
-    if isinstance(entity, cvapimodels.SiteLinkedEntity):
+    if isinstance(entity, cvapimodels.SiteLinkedEntity | cvapimodels.SiteLinkedIssue):
         etree.SubElement(parent, 'site_detail_url').text = etree.CDATA(entity.site_detail_url)
 
-    if isinstance(entity, cvapimodels.LinkedIssue):
+    if isinstance(entity, cvapimodels.LinkedIssue | cvapimodels.SiteLinkedIssue):
         etree.SubElement(parent, 'issue_number').text = None if entity.issue_number is None else str(entity.issue_number)
 
     if isinstance(entity, cvapimodels.CountedSiteLinkedEntity):

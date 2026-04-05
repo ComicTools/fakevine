@@ -303,6 +303,11 @@ class LinkedIssue(BasicLinkedEntity):
 class SiteLinkedEntity(BasicLinkedEntity):
     site_detail_url: str
 
+class SiteLinkedIssue(SiteLinkedEntity):
+    """A unique structure for the issues element of volume resonses."""
+
+    issue_number: str | None = None
+
 class CountedSiteLinkedEntity(SiteLinkedEntity):
     count: str | None = None
 
@@ -533,7 +538,7 @@ class BaseVolume(BaseEntity):
 
 class DetailVolume(BaseVolume):
     characters : list[CountedSiteLinkedEntity] | None = None
-    issues : list[LinkedIssue] | None = None
+    issues : list[SiteLinkedIssue] | None = None
     locations : list[CountedSiteLinkedEntity] | None = None
     objects : list[CountedSiteLinkedEntity] | None = None
 
