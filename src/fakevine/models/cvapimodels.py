@@ -194,6 +194,9 @@ def filtered_model(model_cls: type[BaseModelExtra], field_list: list[str] | None
     if field_list is None or field_list == []:
         return model_cls
 
+    # Need to keep resource_type for xml processing
+    field_list = [*field_list, "resource_type"]
+
     new_fields = {}
 
     for f_name, f_info in model_cls.model_fields.items():
@@ -265,7 +268,8 @@ class CVResponse(BaseModel):
     version: str | None = "1.0"
 
 class BaseModelExtra(BaseModel):
-    _entity_name: str = 'entity'
+    resource_type: Annotated[str,
+        "This is not a part of the standard CV responses, but is implied and used for both search results and xml."] = 'entity'
     model_config = ConfigDict(extra='allow')
 
 class SingleResponse[T](CVResponse):
@@ -319,7 +323,7 @@ class BaseEntity(BaseModelExtra):
     site_detail_url: str
 
 class BaseCharacter(BaseEntity):
-    _entity_name: str = 'character'
+    resource_type: str = 'character'
 
     birth: Annotated[str | None, "Date string in the form %b %d, %Y"] = None
     count_of_issue_appearances: int = 0
@@ -344,7 +348,7 @@ class DetailCharacter(BaseCharacter):
     volume_credits: list[SiteLinkedEntity] = []
 
 class BaseConcept(BaseEntity):
-    _entity_name: str = 'concept'
+    resource_type: str = 'concept'
     count_of_isssue_appearances: Annotated[int, "Isssssssue"] = 0
     first_appeared_in_issue: LinkedIssue | None = None
     start_year: str | None = None
@@ -364,7 +368,7 @@ class AssociatedImages(BaseModel):
     image_tags: str | None = None
 
 class BaseIssue(BaseEntity):
-    _entity_name: str = 'issue'
+    resource_type: str = 'issue'
     associated_images: list[AssociatedImages] = []
     cover_date: Annotated[str | None, 'Response format is %Y-%m-%d but the filter format can be anything up to %Y-%m-%d %H:%M:%S',
     FieldType.Sortable, FieldType.Filterable, FieldType.DateTime] = None
@@ -395,7 +399,7 @@ class DetailIssue(BaseIssue):
     team_disbanded_in: list[SiteLinkedEntity] = []
 
 class BaseLocation(BaseEntity):
-    _entity_name: str = 'location'
+    resource_type: str = 'location'
     count_of_issue_appearances: int | None = None
     first_appeared_in_issue: LinkedIssue | None = None
     start_year: str | None = None
@@ -410,7 +414,7 @@ class DetailLocation(BaseLocation):
 # https://github.com/falo2k/fakevine/issues/1
 
 class BaseObject(BaseEntity):
-    _entity_name: str = 'object'
+    resource_type: str = 'object'
     count_of_issue_appearances: int | None = None
     first_appeared_in_issue: LinkedIssue | None = None
     start_year: str | None = None
@@ -423,7 +427,7 @@ class DetailObject(BaseObject):
 
 # Note that BaseOrigin does not use the common entity base of other models
 class BaseOrigin(BaseModelExtra):
-    _entity_name: str = 'origin'
+    resource_type: str = 'origin'
     api_detail_url: str
     id: Annotated[int, FieldType.Sortable, FieldType.Filterable]
     name: Annotated[str | None, FieldType.Sortable, FieldType.Filterable] = None
@@ -440,7 +444,7 @@ class CVDate(BaseModel):
     timezone_type: Annotated[Literal[3], "Can't find evidence of any other value than 3 here"] = 3
 
 class BasePerson(BaseEntity):
-    _entity_name: str = 'person'
+    resource_type: str = 'person'
     birth: Annotated[str, "Date string in the form %Y-%m-%d %H:%M:%S", FieldType.DateTime] | None = None
     country: str | None = None
     count_of_isssue_appearances: Annotated[int, "Yes, isssue.  You want to fight about it?  Always null."] | None = None
@@ -458,7 +462,7 @@ class DetailPerson(BasePerson):
 
 # /powers doesn't use deck or image from the common entity model
 class BasePower(BaseEntity):
-    _entity_name: str = 'power'
+    resource_type: str = 'power'
     deck: None = None
     image: None = None
 
@@ -466,7 +470,7 @@ class DetailPower(BasePower):
     characters: list[SiteLinkedEntity] = []
 
 class BasePublisher(BaseEntity):
-    _entity_name: str = 'publisher'
+    resource_type: str = 'publisher'
     location_address: str | None = None
     location_city:  str | None = None
     location_state:  str | None = None
@@ -481,7 +485,7 @@ class DetailPublisher(BasePublisher):
 # https://github.com/falo2k/fakevine/issues/1
 
 class BaseStoryArc(BaseEntity):
-    _entity_name: str = 'story_arc'
+    resource_type: str = 'story_arc'
     count_of_isssue_appearances: Annotated[int, "Yes, isssue.  You want to fight about it?"] | None = None
     first_appeared_in_episode: dict[str,Any] | None = None
     first_appeared_in_issue: LinkedIssue | None = None
@@ -493,7 +497,7 @@ class DetailStoryArc(BaseStoryArc):
     movies: list[SiteLinkedEntity] = []
 
 class BaseTeam(BaseEntity):
-    _entity_name: str = 'teams'
+    resource_type: str = 'teams'
     count_of_isssue_appearances: Annotated[int, "Yes, isssue.  You want to fight about it?"] | None = None
     count_of_team_members: int
     first_appeared_in_issue: LinkedIssue | None = None
@@ -511,7 +515,7 @@ class DetailTeam(BaseTeam):
     volume_credits: Annotated[list[SiteLinkedEntity], "Ordered by id asc"] = []
 
 class BaseTypes(BaseModelExtra):
-    _entity_name: str = 'type'
+    resource_type: str = 'type'
     detail_resource_name: str
     id: int
     list_resource_name: str
@@ -520,7 +524,7 @@ class BaseTypes(BaseModelExtra):
 # https://github.com/falo2k/fakevine/issues/1
 
 class BaseVolume(BaseEntity):
-    _entity_name: str = 'volume'
+    resource_type: str = 'volume'
     count_of_issues: int
     first_issue: LinkedIssue | None = None
     last_issue: LinkedIssue | None = None
@@ -533,38 +537,5 @@ class DetailVolume(BaseVolume):
     locations : list[CountedSiteLinkedEntity] | None = None
     objects : list[CountedSiteLinkedEntity] | None = None
 
-class SearchCharacter(BaseCharacter):
-    resource_type: Literal["character"] = "character"
-
-class SearchConcept(BaseConcept):
-    resource_type: Literal["concept"] = "concept"
-
-class SearchIssue(BaseIssue):
-    resource_type: Literal["issue"] = "issue"
-
-class SearchLocation(BaseLocation):
-    resource_type: Literal["location"] = "location"
-
-class SearchObject(BaseObject):
-    resource_type: Literal["object"] = "object"
-
-class SearchOrigin(BaseOrigin):
-    resource_type: Literal["origin"] = "origin"
-
-class SearchPerson(BasePerson):
-    resource_type: Literal["person"] = "person"
-
-class SearchVolume(BaseVolume):
-    resource_type: Literal["volume"] = "volume"
-
-class SearchPublisher(BasePublisher):
-    resource_type: Literal["publisher"] = "publisher"
-
-class SearchStoryArc(BaseStoryArc):
-    resource_type: Literal["story_arc"] = "story_arc"
-
-class SearchTeam(BaseTeam):
-    resource_type: Literal["team"] = "team"
-
-SearchResponse = MultiResponse[SearchCharacter | SearchConcept | SearchIssue | SearchLocation | SearchObject | SearchOrigin | \
-          SearchPerson | SearchPublisher | SearchStoryArc | SearchTeam | SearchVolume | BaseEntity]
+SearchResponse = MultiResponse[BaseCharacter | BaseConcept | BaseIssue | BaseLocation | BaseObject | BaseOrigin | \
+           BasePerson | BasePublisher | BaseStoryArc | BaseTeam | BaseVolume | BaseEntity]

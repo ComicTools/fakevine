@@ -774,32 +774,32 @@ class StaticDBTrunk(ComicTrunk):
         response_objects = []
 
         if params.field_list is None or params.field_list == []:
-            character_model = api.SearchCharacter
-            concept_model = api.SearchConcept
-            issue_model = api.SearchIssue
-            location_model = api.SearchLocation
-            object_model = api.SearchObject
-            origin_model = api.SearchOrigin
-            person_model = api.SearchPerson
-            publisher_model = api.SearchPublisher
-            storyarc_model = api.SearchStoryArc
-            team_model = api.SearchTeam
-            volume_model = api.SearchVolume
+            character_model = api.BaseCharacter
+            concept_model = api.BaseConcept
+            issue_model = api.BaseIssue
+            location_model = api.BaseLocation
+            object_model = api.BaseObject
+            origin_model = api.BaseOrigin
+            person_model = api.BasePerson
+            publisher_model = api.BasePublisher
+            storyarc_model = api.BaseStoryArc
+            team_model = api.BaseTeam
+            volume_model = api.BaseVolume
             entity_model = api.BaseEntity
             return_class = api.SearchResponse
         else:
             field_list = params.field_list.split(',')
-            character_model = api.filtered_model(api.SearchCharacter, field_list)
-            concept_model = api.filtered_model(api.SearchConcept, field_list)
-            issue_model = api.filtered_model(api.SearchIssue, field_list)
-            location_model = api.filtered_model(api.SearchLocation, field_list)
-            object_model = api.filtered_model(api.SearchObject, field_list)
-            origin_model = api.filtered_model(api.SearchOrigin, field_list)
-            person_model = api.filtered_model(api.SearchPerson, field_list)
-            publisher_model = api.filtered_model(api.SearchPublisher, field_list)
-            storyarc_model = api.filtered_model(api.SearchStoryArc, field_list)
-            team_model = api.filtered_model(api.SearchTeam, field_list)
-            volume_model = api.filtered_model(api.SearchVolume, field_list)
+            character_model = api.filtered_model(api.BaseCharacter, field_list)
+            concept_model = api.filtered_model(api.BaseConcept, field_list)
+            issue_model = api.filtered_model(api.BaseIssue, field_list)
+            location_model = api.filtered_model(api.BaseLocation, field_list)
+            object_model = api.filtered_model(api.BaseObject, field_list)
+            origin_model = api.filtered_model(api.BaseOrigin, field_list)
+            person_model = api.filtered_model(api.BasePerson, field_list)
+            publisher_model = api.filtered_model(api.BasePublisher, field_list)
+            storyarc_model = api.filtered_model(api.BaseStoryArc, field_list)
+            team_model = api.filtered_model(api.BaseTeam, field_list)
+            volume_model = api.filtered_model(api.BaseVolume, field_list)
             entity_model = api.filtered_model(api.BaseEntity, field_list)
             filtered_classes = character_model | concept_model | issue_model | location_model | object_model | \
                 origin_model | person_model | publisher_model | storyarc_model |  team_model | volume_model | entity_model
