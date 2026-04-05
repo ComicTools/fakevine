@@ -511,7 +511,7 @@ def cvresponse_to_xml(response: CVResponse) -> str:
             entity_to_xml(response.results, results)
         elif isinstance(response.results, list):
             for entity in response.results:
-                container = etree.SubElement(results, entity._entity_name)  # noqa: SLF001
+                container = etree.SubElement(results, entity.resource_type)
                 entity_to_xml(entity, container)
         elif isinstance(response.results, dict):
             # Should only be used for the currently unmodelled endpoints

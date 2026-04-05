@@ -122,17 +122,17 @@ class SimpleCacheTrunk(ComicTrunk):
         else:
             field_list = params.field_list.split(',')
             filtered_classes = \
-                filtered_model(SearchCharacter, field_list) | \
-                filtered_model(SearchConcept, field_list) | \
-                filtered_model(SearchIssue, field_list) | \
-                filtered_model(SearchLocation, field_list) | \
-                filtered_model(SearchObject, field_list) | \
-                filtered_model(SearchOrigin, field_list) | \
-                filtered_model(SearchPerson, field_list) | \
-                filtered_model(SearchPublisher, field_list) | \
-                filtered_model(SearchStoryArc, field_list) | \
-                filtered_model(SearchTeam, field_list) | \
-                filtered_model(SearchVolume, field_list) | \
+                filtered_model(BaseCharacter, field_list) | \
+                filtered_model(BaseConcept, field_list) | \
+                filtered_model(BaseIssue, field_list) | \
+                filtered_model(BaseLocation, field_list) | \
+                filtered_model(BaseObject, field_list) | \
+                filtered_model(BaseOrigin, field_list) | \
+                filtered_model(BasePerson, field_list) | \
+                filtered_model(BasePublisher, field_list) | \
+                filtered_model(BaseStoryArc, field_list) | \
+                filtered_model(BaseTeam, field_list) | \
+                filtered_model(BaseVolume, field_list) | \
                 filtered_model(BaseEntity, field_list)
             return_class = MultiResponse[filtered_classes]  # ty:ignore[invalid-type-form]
         return return_class.model_validate(await response.json())

@@ -19,7 +19,6 @@ from fakevine.models.cvapimodels import (
     MultiResponse,
     SearchParams,
     SearchResponse,
-    SearchVolume,
     SingleResponse,
     split_and_validate_field_list,
     split_and_validate_filter_list,
@@ -411,13 +410,13 @@ class TestSearchResponse:
     def test_search_response_mixed_base_entity_and_search_volume(self):
         """Test SearchResponse with mixture of BaseEntity and SearchVolume objects."""
         entity = BaseEntity(**base_entity_kwargs(id=1, aliases="Test"))
-        volume = SearchVolume(**search_volume_kwargs(id=2, name="Volume 1"))
+        volume = BaseVolume(**search_volume_kwargs(id=2, name="Volume 1"))
         sr = SearchResponse(results=[entity, volume])
         assert len(sr.results) == 2
         assert sr.results[0].id == 1
         assert sr.results[1].id == 2
         assert isinstance(sr.results[0], BaseEntity)
-        assert isinstance(sr.results[1], SearchVolume)
+        assert isinstance(sr.results[1], BaseVolume)
 
 
 

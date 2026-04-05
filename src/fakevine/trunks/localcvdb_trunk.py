@@ -321,11 +321,11 @@ class LocalCVDBTrunk(ComicTrunk):
             raise ObjectNotFoundError
 
         if params.field_list is None or params.field_list == []:
-            volume_model = api.SearchVolume
+            volume_model = api.BaseVolume
             return_class = api.SearchResponse
         else:
             field_list = params.field_list.split(',')
-            volume_model = api.filtered_model(api.SearchVolume, field_list)
+            volume_model = api.filtered_model(api.BaseVolume, field_list)
             return_class = api.MultiResponse[volume_model]  # ty:ignore[invalid-type-form]
 
         if params.resources is None or params.resources == "" or "volume" in params.resources:
