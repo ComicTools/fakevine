@@ -247,3 +247,22 @@ class SimpleCacheTrunk(ComicTrunk):
 
     async def video_categories(self, params: FilterParams) -> MultiResponse[BaseModelExtra]:
         return await self._process_response('video_categories', params, MultiResponse, BaseModelExtra)  # ty:ignore[invalid-return-type]
+
+    async def health_check(self) -> dict[str, str]:
+        """Check health of the cache by verifying database connectivity.
+
+        Returns
+        -------
+        dict[str, str]
+            Dictionary with 'status' set to 'ok' and 'trunk' set to 'cache'.
+
+        """
+        try:
+            self._setup_session()
+            # Test basic connectivity to cache database
+            if self._cache is not None:
+                _ = await self._session.get('video-types/')  # ty:ignore[unresolved-attribute]
+        except Exception as exc:
+            message = f"Cache health check failed: {exc}"
+            raise RuntimeError(message) from exc
+        return {"status": "ok", "trunk": "cache"}

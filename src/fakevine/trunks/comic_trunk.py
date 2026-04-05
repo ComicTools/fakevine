@@ -188,6 +188,23 @@ class ComicTrunk(ABC):
     async def video_categories(self, params: FilterParams) -> MultiResponse[BaseModelExtra]:
         ...
 
+    @abstractmethod
+    async def health_check(self) -> dict[str, str]:
+        """Check health of the trunk and underlying data source.
+
+        Returns
+        -------
+        dict[str, str]
+            Dictionary with 'status' key set to 'ok' if healthy.
+
+        Raises
+        ------
+        Exception
+            Any exception raised indicates the trunk is not healthy.
+
+        """
+        ...
+
     async def types(self, params: CommonParams) -> MultiResponse[BaseTypes]:  # noqa: ARG002
         return MultiResponse[BaseTypes].model_validate_json(
             json_data= '''

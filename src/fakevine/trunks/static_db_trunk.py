@@ -1141,3 +1141,25 @@ class StaticDBTrunk(ComicTrunk):
 
     async def video_categories(self, params: api.FilterParams) -> api.MultiResponse[api.BaseModelExtra]:
         raise NotImplementedError("Route not implemented by trunk")
+
+    async def health_check(self) -> dict[str, str]:
+        """Check health of the database by validating connectivity.
+
+        Returns
+        -------
+        dict[str, str]
+            Dictionary with 'status' set to 'ok' and 'trunk' set to 'staticdb'.
+
+        Raises
+        ------
+        RuntimeError
+            If database connection cannot be established.
+
+        """
+        try:
+            async with self.session() as session:
+                await session.execute(text("SELECT 1"))
+        except Exception as exc:
+            message = f"StaticDB health check failed: {exc}"
+            raise RuntimeError(message) from exc
+        return {"status": "ok", "trunk": "staticdb"}

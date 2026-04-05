@@ -10,24 +10,6 @@ Some error scenario responses are not exact copies - CV returns a webpage for so
 
 The models are based on the [CV API documentation](https://comicvine.gamespot.com/api/documentation), and analysing actual CV data.  If it deviates from the documentation, that is likely because the documentation is wrong - e.g. no, [`/teams`](https://comicvine.gamespot.com/api/documentation#toc-0-34) is not filterable on `aliases`.  You may notice that there are a lot of nullable fields in the CV response models.  These reflect the real state of CV data rather than an ideal view of what could be (e.g. the API will serve empty volumes).  At the time of writing, I've only done models for the comic elements in the API as that's where I believe most use comes from.  It's possible that some validation will fail because of some unforseen futzery in ComicVine's data (if using as a cache) - please do report any such issues you find!  I have used these models to parse responses across all detail (single response) endpoints from CV without failures.
 
-## Features
-:thumbsup: **Current:**
-- Backends offering a SQLite backed cache for ComicVine or static SQLite database sources
-- JSON and XML responses
-- Docker images to run as services
-
-:writing_hand: **Planned:**
-- A backend to serve data from a JSON file (mostly to support smaller test scenarios)
-- Configurable failure scenarios to force failures from certain API calls
-- Support remapping API URLs in responses to the FakeVine route 
-- Host a static folder for cover caching
-- Healthcheck for the app and trunks, primarily for Docker to monitor
-
-:thumbsdown: **Unplanned:**
-- Request caching.  You can add a service like Caddy's [cache-handler](https://github.com/caddyserver/cache-handler) in front.
-- Rate limiting.  It might come later, but any implementation to achieve any control at the scale it's necessary would likely need external services anyway, so it makes more sense to suggest utilising a Caddy rate limiting plugin for this as well.
-- More complex authentication.  I'm sure it could do better than simple string checks on a list of api keys, but that'll do for the scope of this while remaining CV compatible.
-
 ## Running The App
 Launch the app using [uv](https://docs.astral.sh/uv/) with `uv run fakevine`.
 
@@ -97,3 +79,19 @@ if __name__ == "__main__":
 Contributions will be welcome once I've got the core finished, but I'd suggest reaching out before starting anything large.  Contributions that are entirely or majority AI generated (both code and documentation) will likely be rejected.   You can find me on the [CBL-ReadingLists discord](https://discord.gg/DQmHfzFdGG). 
 
 Any commits should be done using [commitizen](https://commitizen-tools.github.io/commitizen/) by running `uv run cz c`.  Consider squashing before submitting a PR if you have a scrappy commit history.
+
+## Feature Log
+:thumbsup: **Current:**
+- Backends offering a SQLite backed cache for ComicVine or static SQLite database sources
+- JSON and XML response types
+
+:writing_hand: **Planned:**
+- A backend to serve data from a JSON file (mostly to support smaller test scenarios)
+- Configurable failure scenarios to force failures from certain API calls
+- Support remapping API URLs in responses to the FakeVine route 
+- Host a static folder for cover caching
+
+:thumbsdown: **Unplanned:**
+- Request caching.  You can add a service like Caddy's [cache-handler](https://github.com/caddyserver/cache-handler) in front.
+- Rate limiting.  It might come later, but any implementation to achieve any control at the scale it's necessary would likely need external services anyway, so it makes more sense to suggest utilising a Caddy rate limiting plugin for this as well.
+- More complex authentication.  I'm sure it could do better than simple string checks on a list of api keys, but that'll do for the scope of this while remaining CV compatible.
