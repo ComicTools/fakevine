@@ -105,6 +105,7 @@ class CVApp:
 
     def _attach_routes(self) -> None:
         routes =[
+            ('/health', self._get_health, "Health Check", False),
             ('/character/4005-{character_id}', self._get_character, "Character Detail", True),
             ('/characters', self._get_characters, "Character Search", True),
             ('/chat/2450-{item_id}', self._get_object_not_found, "Chat Detail", False),
@@ -251,6 +252,22 @@ class CVApp:
         return await self._fetch_response(
             params=CommonParams.model_validate({'format':format, 'api_key': api_key}),
             trunk_method= self.trunk.types)
+
+    async def _get_health(self) -> JSONResponse:
+        """Health check endpoint for monitoring service availability.
+
+        Returns
+        -------
+        JSONResponse
+            JSON response with 'status' and 'trunk' information.
+
+        """
+        try:
+            health_info = await self.trunk.health_check()
+            return JSONResponse(content=health_info, status_code=status.HTTP_200_OK)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"Health check failed: {exc}")
+            return JSONResponse(content={"status": "unhealthy", "error": str(exc)}, status_code=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     async def _get_character(self, character_id: int, params: Annotated[CommonParams, Query()]) -> Response:
         params.field_list = validate_field_list(params.field_list, cvapimodels.DetailCharacter)
