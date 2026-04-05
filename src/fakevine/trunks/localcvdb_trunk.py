@@ -96,6 +96,9 @@ class LocalCVDBTrunk(ComicTrunk):
                 query = query.where(columns[filter_name].contains(filter_value))
             elif 'int' in str(field_info.annotation):
                 query = query.where(columns[filter_name] == filter_value)
+            elif filter_name == 'volume':
+                # Special case for issue search
+                query = query.where(columns['volume_id'] == filter_value)
             else:
                 error_msg = f'Do not know how to handle filter for {filter_name} with type {field_info.annotation}.  Ignoring.'
                 logger.error(error_msg)
@@ -150,8 +153,8 @@ class LocalCVDBTrunk(ComicTrunk):
                 field_list = params.field_list.split(',')
                 return_class = api.filtered_model(api_model, field_list)
 
-            item_query = self._build_filtered_query(item_query, filter_list, return_class.model_fields)
-            item_count_query = self._build_filtered_query(item_count_query, filter_list, return_class.model_fields)
+            item_query = self._build_filtered_query(item_query, filter_list, api_model.model_fields)
+            item_count_query = self._build_filtered_query(item_count_query, filter_list, api_model.model_fields)
 
             record_count: int = (await session.execute(item_count_query)).scalar()
             item_rows: Sequence[Row] = (await session.execute(item_query)).all()
@@ -430,7 +433,7 @@ class LocalCVDBTrunk(ComicTrunk):
                     .where(db.Issue.volume_id == db_record.id) \
                     .order_by(asc(db.Issue.cover_date)))).all()
             response_dict['count_of_issues'] = len(query)
-            response_dict['issues'] = self._rows_to_list(query, api.LinkedIssue)
+            response_dict['issues'] = self._rows_to_list(query, api.SiteLinkedIssue)
             if len(query) > 0:
                 response_dict['first_issue'] = query[0]._asdict()
                 response_dict['last_issue'] = query[-1]._asdict()

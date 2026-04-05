@@ -10,6 +10,8 @@ Some error scenario responses are not exact copies - CV returns a webpage for so
 
 The models are based on the [CV API documentation](https://comicvine.gamespot.com/api/documentation), and analysing actual CV data.  If it deviates from the documentation, that is likely because the documentation is wrong - e.g. no, [`/teams`](https://comicvine.gamespot.com/api/documentation#toc-0-34) is not filterable on `aliases`.  You may notice that there are a lot of nullable fields in the CV response models.  These reflect the real state of CV data rather than an ideal view of what could be (e.g. the API will serve empty volumes).  At the time of writing, I've only done models for the comic elements in the API as that's where I believe most use comes from.  It's possible that some validation will fail because of some unforseen futzery in ComicVine's data (if using as a cache) - please do report any such issues you find!  I have used these models to parse responses across all detail (single response) endpoints from CV without failures.
 
+There are some differences in the XML and json responses.  CV is completely inconsistent in the structure and attributes returned in each for the same entity.  It's frankly infuriating, but as I don't want to maintain a whole XML supporting model in addition to the main API model, responses from FakeVine may have **additional** data returned (depending on the source).  As always, if you're building apps off the CV API, make sure you test them against the actual API first.
+
 ## Running The App
 Launch the app using [uv](https://docs.astral.sh/uv/) with `uv run fakevine`.
 
