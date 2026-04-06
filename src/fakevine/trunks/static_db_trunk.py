@@ -861,7 +861,7 @@ class StaticDBTrunk(ComicTrunk):
 
         union_query = selection_set[0] if len(selection_set) == 1 else selection_set[0].union_all(*selection_set[1:])
 
-        count_query = union_query.order_by(text('rank'))
+        count_query = select(func.count(text('rowid'))).select_from(union_query.subquery())
         data_query = union_query.order_by(text('rank')).offset(params.offset).limit(params.limit)
 
         async with self.session() as session:
