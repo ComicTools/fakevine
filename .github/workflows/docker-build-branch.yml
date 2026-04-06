@@ -6,6 +6,7 @@ on:
       - master
       - 'renovate/**'
       - 'release-please/**'
+      - 'release-please-**'
   workflow_dispatch:
 
 concurrency:
