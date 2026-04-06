@@ -522,7 +522,7 @@ def cvresponse_to_xml(response: CVResponse) -> str:
 
     etree.SubElement(root, 'version').text = response.version
 
-    return etree.tostring(root, xml_declaration=True, encoding='utf8').decode()
+    return etree.tostring(root, xml_declaration=True, encoding='utf-8').decode()
 
 def entity_to_xml(entity: cvapimodels.BaseModelExtra, parent: _Element) -> None:  # noqa: C901
     """Encode a response entity as XML."""
