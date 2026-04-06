@@ -61,9 +61,7 @@ jobs:
             TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${VERSION}${VARIANT_SUFFIX}"
           # If this is a commit to master
           elif [ "${{ github.ref }}" = "refs/heads/master" ]; then
-            SHORT_SHA=${GITHUB_SHA:0:7}
             TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly${VARIANT_SUFFIX}"
-            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:nightly-${SHORT_SHA}${VARIANT_SUFFIX}"
           fi
 
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
@@ -101,4 +99,5 @@ jobs:
           package-name: ${{ github.event.repository.name }}
           package-type: container
           min-versions-to-keep: 10
-          ignore-versions: '^(latest|nightly|latest-dev|nightly-dev)$'
+          delete-only-untagged-versions: true
+          #ignore-versions: '^latest$|^nightly$|^latest-dev$|^nightly-dev$'

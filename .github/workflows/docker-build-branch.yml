@@ -55,11 +55,9 @@ jobs:
 
           # Extract branch name from ref
           BRANCH_NAME=${GITHUB_REF#refs/heads/}
-          SHORT_SHA=${GITHUB_SHA:0:7}
           
           TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${BRANCH_NAME}${VARIANT_SUFFIX}"
-          TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${BRANCH_NAME}-${SHORT_SHA}${VARIANT_SUFFIX}"
-
+          
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
           echo "dockerfile=${DOCKERFILE}" >> $GITHUB_OUTPUT
           echo "branch=${BRANCH_NAME}" >> $GITHUB_OUTPUT
@@ -95,4 +93,5 @@ jobs:
           package-name: ${{ github.event.repository.name }}
           package-type: container
           min-versions-to-keep: 10
-          ignore-versions: '^(latest|nightly|latest-dev|nightly-dev)$'
+          delete-only-untagged-versions: true
+          #ignore-versions: '^latest$|^nightly$|^latest-dev$|^nightly-dev$'
