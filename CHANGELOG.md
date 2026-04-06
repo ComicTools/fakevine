@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.2](https://github.com/falo2k/fakevine/compare/v0.2.1...v0.2.2) (2026-04-06)
+
+
+### Bug Fixes
+
+* **staticdb:** broken search record count ([170d803](https://github.com/falo2k/fakevine/commit/170d803ca46f0d3a37e7b0fc3cef19a9a3143e24))
+* tolerance and clamping outside limit ranges ([cf80d32](https://github.com/falo2k/fakevine/commit/cf80d3205f33bc9a1953fe7e4d536cb78c8f1512))
+* undocumented page parameter ([cf80d32](https://github.com/falo2k/fakevine/commit/cf80d3205f33bc9a1953fe7e4d536cb78c8f1512))
+
 ## [0.2.1](https://github.com/falo2k/fakevine/compare/v0.2.0...v0.2.1) (2026-04-06)
 
 
