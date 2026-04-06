@@ -138,6 +138,8 @@ class LocalCVDBTrunk(ComicTrunk):
                                         mapping_function: Callable) -> api.MultiResponse[api.BaseModelExtra]:
         async with self.session() as session:
             sort_params = ('id', 'asc') if params.sort is None or params.sort == "" else tuple(params.sort.split(':'))
+            if sort_params[0] not in [col.name for col in db_table.__table__.columns]:  # ty:ignore[unresolved-attribute]
+                sort_params = ('id', sort_params[1])
             sort_string = f'{sort_params[0]} {sort_params[1].upper()}'
 
             filter_list = [] if params.filter is None else params.filter.split(',')
