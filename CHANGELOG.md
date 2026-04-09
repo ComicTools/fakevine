@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/falo2k/fakevine/compare/v0.2.2...v0.3.0) (2026-04-09)
+
+
+### Features
+
+* added locust as a tool for load testing and implemented a basic ttlcache on trunks for 5 minutes ([e9c347a](https://github.com/falo2k/fakevine/commit/e9c347af8b0ac97001bb59fcc70f4693d54cab11))
+
 ## [0.2.2](https://github.com/falo2k/fakevine/compare/v0.2.1...v0.2.2) (2026-04-06)
 
 
