@@ -432,6 +432,12 @@ class LocalCVDBTrunk(ComicTrunk):
                 'site_detail_url': db_record.publisher.site_detail_url,
             }
 
+        if db_record.image_url is not None and 'image' in field_list:
+            response_dict['image'] = {
+                "image_tags": "All Images",
+                "super_url" : db_record.image_url,
+            }
+
         if 'issues' in field_list or 'count_of_issues' in field_list or \
              'first_issue' in field_list or 'last_issue' in field_list:
             query: list = (await session.execute(
