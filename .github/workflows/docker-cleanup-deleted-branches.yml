@@ -1,0 +1,44 @@
+name: Delete Docker Images for Deleted Branch
+
+on:
+  delete
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.ref_type == 'branch' && github.event.ref != 'master' && !startsWith(github.event.ref, 'renovate/') && !startsWith(github.event.ref, 'release-please/')
+    permissions:
+      packages: write
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete Docker images for branch
+        run: |
+            BRANCH_NAME="${{ github.event.ref }}"
+          
+            # Get all package versions and filter by tag pattern
+            VERSIONS=$(gh api orgs/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/versions \
+                --jq ".[] | select(.metadata.container.tags[] | test(\"^(${BRANCH_NAME}|${BRANCH_NAME}-dev)$\")) | .id" || true)
+            
+            if [ -z "$VERSIONS" ]; then
+                echo "No images found for matching branch: ${BRANCH_NAME}"
+            else
+                for VERSION_ID in $VERSIONS; do
+                    echo "Deleting image version: $VERSION_ID"
+                    gh api -X DELETE orgs/${{ github.repository_owner }}/packages/container/${{ github.event.repository.name }}/versions/$VERSION_ID \
+                    || echo "Failed to delete version $VERSION_ID"
+                done
+            
+                echo "Cleanup completed for branch: ${BRANCH_NAME}"
+            fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
