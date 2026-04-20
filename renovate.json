@@ -15,13 +15,9 @@
     "enabled": true,
     "automerge": true
   },
-  "packageRules": [{
-      "matchManagers": [
-        "docker-compose"
-      ],
-      "matchUpdateTypes": [
-        "digest"
-      ],
-    "enabled": false
-  }]
+  "docker-compose": {
+    "pin" : {
+      "enabled": false
+    }
+  }
 }
