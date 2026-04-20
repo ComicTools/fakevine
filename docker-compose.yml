@@ -1,6 +1,6 @@
 services:
   fakevine:
-    image: ghcr.io/comictools/fakevine:latest
+    image: ghcr.io/comictools/fakevine:latest@sha256:ca8753ab6034e5527dd4685b6b49419655401d7b19e696c73dcf24d552fb424c
     ports:
       - "8463:8463"
     volumes:
