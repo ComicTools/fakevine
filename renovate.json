@@ -3,7 +3,6 @@
   "extends": [
     "config:recommended",
     "schedule:weekly",
-    "docker:pinDigests",
     "helpers:pinGitHubActionDigests", 
     ":configMigration", 
     ":pinDevDependencies", 
@@ -15,13 +14,19 @@
     "enabled": true,
     "automerge": true
   },
-  "packageRules": [{
+  "packageRules": [
+    {
       "matchManagers": [
+        "dockerfile"
+      ],
+      "pinDigests": true
+    },
+    {
+      "matchManagers": [
+        "devcontainer",
         "docker-compose"
       ],
-      "matchUpdateTypes": [
-        "digest"
-      ],
-    "enabled": false
-  }]
+      "pinDigests": false
+    }
+  ]
 }
