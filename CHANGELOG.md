@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/ComicTools/fakevine/compare/v0.3.0...v0.3.1) (2026-04-29)
+
+
+### Documentation
+
+* added mylar discord link ([ca4209b](https://github.com/ComicTools/fakevine/commit/ca4209ba96fe8835c4ee34f1038542093330a744))
+
 ## [0.3.0](https://github.com/ComicTools/fakevine/compare/v0.2.2...v0.3.0) (2026-04-14)
 
 
