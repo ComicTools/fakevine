@@ -76,6 +76,8 @@ jobs:
           file: ./${{ steps.meta.outputs.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/amd64
+          provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -94,11 +96,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Delete old images
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 #v5
-        continue-on-error: true
+        uses: dataaxiom/ghcr-cleanup-action@cd0cdb900b5dbf3a6f2cc869f0dbb0b8211f50c4 #v1.0
         with:
-          package-name: ${{ github.event.repository.name }}
-          package-type: container
-          min-versions-to-keep: 10
-          delete-only-untagged-versions: true
-          #ignore-versions: '^latest$|^nightly$|^latest-dev$|^nightly-dev$'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          keep-n-untagged: 5

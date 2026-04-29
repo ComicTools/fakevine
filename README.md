@@ -1,6 +1,3 @@
-## WARNING
-Project is still in core development, so may have some refactoring in the short term until 0.1.0 release.
-
 # FakeVine
 This is a ComicVine compatible API package that can serve comic metadata using the same endpoints provided by the [ComicVine API](https://comicvine.gamespot.com/api/documentation).  With an appropriate backend, it can act as a cache for ComicVine API calls, a mock instance for testing comics applications, or a host for serving from static data dumps.
 
