@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/ComicTools/fakevine/compare/v0.3.1...v0.3.2) (2026-06-02)
+
+
+### Bug Fixes
+
+* fix lru cache hashkey on staticdb ([22d5893](https://github.com/ComicTools/fakevine/commit/22d5893939702693c9c10c906a85dec5cd1b5938))
+
 ## [0.3.1](https://github.com/ComicTools/fakevine/compare/v0.3.0...v0.3.1) (2026-04-29)
 
 
