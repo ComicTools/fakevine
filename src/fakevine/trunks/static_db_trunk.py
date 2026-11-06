@@ -19,7 +19,6 @@ from sqlalchemy import (
     create_engine,
     func,
     literal_column,
-    or_,
     select,
 )
 from sqlalchemy.exc import DatabaseError
@@ -39,6 +38,22 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Query
     from sqlalchemy.sql.base import ReadOnlyColumnCollection
     from sqlalchemy.sql.elements import KeyedColumnElement
+
+
+def _build_fts_queries(query: str | None) -> tuple[str, str]:
+    """Build strict and loose FTS5 queries from user-supplied terms."""
+    if query is None:
+        raise ObjectNotFoundError
+
+    quoted_tokens = []
+    for token in re.findall(r"[^\W_]+", query):
+        escaped_token = token.replace('"', '""')
+        quoted_tokens.append(f'"{escaped_token}"')
+
+    if not quoted_tokens:
+        raise ObjectNotFoundError
+
+    return " AND ".join(quoted_tokens), " OR ".join(quoted_tokens)
 
 
 class StaticDBTrunk(ComicTrunk):
@@ -782,9 +797,6 @@ class StaticDBTrunk(ComicTrunk):
     @cached(cache=TTLCache(ttl=360, maxsize=128), key=lambda _, params:
         hashkey(params.field_list, params.limit, params.offset, params.sort, params.page, params.resources, params.query))
     async def search(self, params: api.SearchParams) -> api.SearchResponse:
-        if params.query is None or params.query == "":
-            raise ObjectNotFoundError
-
         response_objects = []
 
         if params.field_list is None or params.field_list == []:
@@ -843,13 +855,7 @@ class StaticDBTrunk(ComicTrunk):
             #"video": ("cv_video_fts", ???, entity_model),  # noqa: ERA001
         }
 
-        def clean_token(token: str) -> str:
-            dialect_string = String().literal_processor(dialect=self.db_engine.dialect)(value=token)
-            if re.search(r"[^a-zA-Z0-9]",dialect_string[1:-1]) is not None:
-                dialect_string = "'\"" + dialect_string[1:-1].replace('"', '') + "\"'"
-            return dialect_string
-
-        cleaned_query_tokens = [clean_token(token) for token in params.query.split(' ') if token != '']
+        strict_fts_query, loose_fts_query = _build_fts_queries(params.query)
 
         # Create an empty selection to load unions against
         selection_set = select(
@@ -861,16 +867,35 @@ class StaticDBTrunk(ComicTrunk):
 
         for resource in resources:
             fts_table, fts_orm, *_ = resource_map[resource]
-            resource_query = select(fts_orm.rowid, literal_column(f"'{resource}'", String).label('resource_type'), text('rank'))
-            query_clauses = [text(f"{fts_table} MATCH {token}") for token in cleaned_query_tokens]
-            resource_query = resource_query.where(or_(*query_clauses))
+            strict_match = text(f"{fts_table} MATCH :strict_fts_query")
+            strict_rowids = select(fts_orm.rowid).where(strict_match).params(strict_fts_query=strict_fts_query)
 
-            selection_set.append(resource_query)
+            strict_resource_query = select(
+                fts_orm.rowid,
+                literal_column(f"'{resource}'", String).label('resource_type'),
+                text('rank'),
+                literal_column("0", Integer).label('match_tier'),
+            ).where(strict_match).params(strict_fts_query=strict_fts_query)
+
+            loose_resource_query = select(
+                fts_orm.rowid,
+                literal_column(f"'{resource}'", String).label('resource_type'),
+                text('rank'),
+                literal_column("1", Integer).label('match_tier'),
+            ).where(
+                text(f"{fts_table} MATCH :loose_fts_query"),
+                fts_orm.rowid.not_in(strict_rowids),
+            ).params(
+                loose_fts_query=loose_fts_query,
+                strict_fts_query=strict_fts_query,
+            )
+
+            selection_set.extend((strict_resource_query, loose_resource_query))
 
         union_query = selection_set[0] if len(selection_set) == 1 else selection_set[0].union_all(*selection_set[1:])
 
         count_query = select(func.count(text('rowid'))).select_from(union_query.subquery())
-        data_query = union_query.order_by(text('rank')).offset(params.offset).limit(params.limit)
+        data_query = union_query.order_by(text('match_tier'), text('rank')).offset(params.offset).limit(params.limit)
 
         async with self.session() as session:
             item_count: int = (await session.execute(count_query)).scalar()
